@@ -57,13 +57,24 @@ export const GraphCanvas: React.FC<GraphCanvasProps> = ({ nodes, links, onNodeCl
         .distance(d => {
           const sNode = nodes.find(n => n.id === (typeof d.source === 'string' ? d.source : d.source.id));
           const tNode = nodes.find(n => n.id === (typeof d.target === 'string' ? d.target : d.target.id));
-          return sNode?.cluster === tNode?.cluster ? 80 : 220;
+          // Tighter links within clusters, looser across them
+          return sNode?.cluster === tNode?.cluster ? 100 : 250;
+        })
+        .strength(d => {
+           const sNode = nodes.find(n => n.id === (typeof d.source === 'string' ? d.source : d.source.id));
+           const tNode = nodes.find(n => n.id === (typeof d.target === 'string' ? d.target : d.target.id));
+           // Cross-cluster links are weaker to allow layers to separate
+           return sNode?.cluster === tNode?.cluster ? 1 : 0.3;
         }))
-      .force('charge', d3.forceManyBody().strength(-400))
+      .force('charge', d3.forceManyBody().strength(-600)) // Stronger repulsion for better separation
       .force('center', d3.forceCenter(width / 2, height / 2))
-      .force('x', d3.forceX(width / 2).strength(0.05))
-      .force('y', d3.forceY(height / 2).strength(0.05))
-      .force('collision', d3.forceCollide().radius(d => (d as GraphNode).size + 25))
+      .force('x', d3.forceX(width / 2).strength(0.08))
+      .force('y', d3.forceY(height / 2).strength(0.08))
+      // Radial force: Centralize important nodes
+      .force('radial', d3.forceRadial(0, width / 2, height / 2).strength(d => {
+        return (d as GraphNode).data.importance > 10 ? 0.2 : 0.02;
+      }))
+      .force('collision', d3.forceCollide().radius(d => (d as GraphNode).size + 40).iterations(3))
       .force('cluster', (alpha: number) => {
         const centroids: Record<string, { x: number, y: number, count: number }> = {};
         nodes.forEach(n => {
@@ -79,8 +90,9 @@ export const GraphCanvas: React.FC<GraphCanvasProps> = ({ nodes, links, onNodeCl
           const c = centroids[n.cluster];
           const cx = c.x / c.count;
           const cy = c.y / c.count;
-          n.vx = (n.vx || 0) + (cx - (n.x || 0)) * alpha * 0.15;
-          n.vy = (n.vy || 0) + (cy - (n.y || 0)) * alpha * 0.15;
+          // Softly pull toward cluster center
+          n.vx = (n.vx || 0) + (cx - (n.x || 0)) * alpha * 0.2;
+          n.vy = (n.vy || 0) + (cy - (n.y || 0)) * alpha * 0.2;
         });
       });
 
@@ -163,16 +175,33 @@ export const GraphCanvas: React.FC<GraphCanvasProps> = ({ nodes, links, onNodeCl
       const activeFocusId = selectedNodeId;
 
       if (!activeFocusId) {
-        link.transition().duration(400)
+        link.transition().duration(500)
           .attr('stroke', '#374151')
           .attr('stroke-opacity', 0.3)
           .attr('stroke-width', 1);
-        node.transition().duration(400)
+        node.transition().duration(500)
           .attr('opacity', 1)
           .style('filter', 'none');
-        node.selectAll('text').transition().duration(400).attr('opacity', 1);
+        node.selectAll('text').transition().duration(500).attr('opacity', 1);
+        
+        svg.select('.focus-overlay').transition().duration(500).attr('opacity', 0);
         return;
       }
+
+      // Add a dark immersive overlay if it doesn't exist
+      if (svg.select('.focus-overlay').empty()) {
+        svg.insert('rect', ':first-child')
+          .attr('class', 'focus-overlay')
+          .attr('width', '100%')
+          .attr('height', '100%')
+          .attr('fill', '#000')
+          .attr('opacity', 0)
+          .style('pointer-events', 'none');
+      }
+
+      svg.select('.focus-overlay')
+        .transition().duration(500)
+        .attr('opacity', isFocusMode ? 0.85 : 0.4);
 
       const connectedNodes = new Set<string>([activeFocusId]);
       links.forEach(l => {

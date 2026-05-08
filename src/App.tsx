@@ -8,7 +8,7 @@ import {
   Upload, Network, Code2, 
   Copy, FileText, CheckCircle2, 
   ChevronRight, X, Play, 
-  Search, Info, Database, Download,
+  Search, Info, Database, Download, Lightbulb,
   LayoutDashboard, Share2, Folder, ChevronDown,
   Sparkles, AlertCircle, Loader2, BarChart3, Activity
 } from 'lucide-react';
@@ -340,15 +340,43 @@ ${context}`,
   const generateAIContext = () => {
     if (!projectData) return "";
 
-    let context = "### ESTRUCTURA DE DIRECTORIOS\n";
+    // Detect technical stack
+    const stack = new Set<string>();
+    projectData.files.forEach(f => {
+      const code = f.content.toLowerCase();
+      if (code.includes('express')) stack.add('Express.js');
+      if (code.includes('react')) stack.add('React');
+      if (code.includes('mongoose') || code.includes('sequelize') || code.includes('prisma')) stack.add('Database (ORM/ODM)');
+      if (code.includes('tailwind')) stack.add('Tailwind CSS');
+      if (code.includes('typescript')) stack.add('TypeScript');
+      if (code.includes('firebase')) stack.add('Firebase');
+      if (code.includes('socket.io')) stack.add('WebSockets');
+    });
+
+    let context = "### ARCHITECTURAL INTELLIGENCE SNAPSHOT\n";
+    context += `Project Context: ProjectGrapher AI\n`;
+    context += `Tech Stack: ${Array.from(stack).join(', ') || 'Standard Node.js/Web'}\n`;
+    context += `Scale: ${projectData.files.length} Analyzed Modules\n\n`;
+
+    context += "### ESTRUCTURA DE DIRECTORIOS\n";
     const tree = buildFileTree(projectData.files);
     context += generateTreeText(tree) + "\n";
 
-    context += "### RESUMEN DE ARQUITECTURA\n";
-    context += `Proyecto: ${projectData.files[0]?.path.split('/')[0] || 'Unknown'}\n`;
-    context += `Archivos: ${projectData.files.length}, Relaciones Detectadas: ${projectData.links.length}\n\n`;
+    context += "### MODULE LAYER OVERVIEW\n";
+    // Group by top-level directory to show functional layers (MVC, etc)
+    const layers: Record<string, string[]> = {};
+    projectData.files.forEach(f => {
+      const parts = f.path.split('/');
+      const layer = parts.length > 1 ? parts[0] : 'root';
+      if (!layers[layer]) layers[layer] = [];
+      if (layers[layer].length < 10) layers[layer].push(f.name);
+    });
     
-    context += "### GRAFO DE DEPENDENCIAS\n";
+    Object.entries(layers).forEach(([layer, files]) => {
+      context += `- [${layer.toUpperCase()}]: ${files.join(', ')}${files.length >= 10 ? '...' : ''}\n`;
+    });
+
+    context += "\n### STRATEGIC CLASS/FILE RELATIONSHIPS\n";
     projectData.nodes.forEach(n => {
       const deps = projectData.links
         .filter(l => {
@@ -362,21 +390,29 @@ ${context}`,
         });
 
       if (deps.length > 0) {
-        context += `- [${n.label}] depends on: ${deps.join(', ')}\n`;
+        context += `[${n.label}] calls -> (${deps.join(', ')})\n`;
       }
     });
 
-    context += "\n### KEY FILE SUMMARIES (TOP 15)\n";
-    // Sort by importance to include most relevant first
+    context += "\n### KEY SOURCE CODE (COMPRESSED TOP 12)\n";
     const keyFiles = [...projectData.files]
       .sort((a, b) => (b.importance || 0) - (a.importance || 0))
-      .slice(0, 15);
+      .slice(0, 12);
 
     keyFiles.forEach(f => {
       const lines = f.content.split('\n');
-      const preview = lines.slice(0, 100).join('\n');
-      context += `\n--- FILE: ${f.path} ---\n\`\`\`${f.ext.replace('.', '')}\n${preview}${lines.length > 100 ? '\n// ... code continues' : ''}\n\`\`\`\n`;
+      // For very large projects, we compress code by removing comments for the snapshot
+      const compressedCode = lines
+        .filter(line => !line.trim().startsWith('//') && !line.trim().startsWith('/*'))
+        .slice(0, 80)
+        .join('\n');
+        
+      context += `\n--- SOURCE: ${f.path} ---\n\`\`\`${f.ext.replace('.', '')}\n${compressedCode}${lines.length > 80 ? '\n// ... code continues (truncated for efficiency)' : ''}\n\`\`\`\n`;
     });
+
+    context += "\n### AI INSTRUCTIONS:\n";
+    context += "1. Analyze these layers to propose modular improvements.\n";
+    context += "2. Reference internal dependencies to maintain data integrity.\n";
 
     return context;
   };
@@ -921,9 +957,29 @@ ${context}`,
                   </p>
                 </div>
 
+                <div className="bg-brand-secondary/5 border border-brand-secondary/20 p-5 rounded-3xl mb-6 flex flex-col gap-3">
+                  <div className="flex items-center gap-2 text-brand-secondary">
+                    <Lightbulb className="w-4 h-4" />
+                    <span className="text-[10px] font-bold uppercase tracking-widest">Consejo Pro para el Agente</span>
+                  </div>
+                  <div className="space-y-2">
+                    <p className="text-[11px] text-gray-400 leading-relaxed">
+                      Cuando descargues el <span className="text-brand-secondary font-mono">snapshot_completo.txt</span>, simplemente dile a tu agente de IA:
+                    </p>
+                    <div className="p-3 bg-black/40 rounded-xl border border-white/5 text-gray-300 italic text-[11px] font-mono leading-relaxed">
+                      "Analiza este snapshot de mi arquitectura. Dame un resumen de la lógica de flujo y propón una mejora modular basada en las capas detectadas."
+                    </div>
+                  </div>
+                </div>
+
                 <div className="flex items-center justify-between">
                   <h4 className="text-[10px] font-bold text-gray-500 uppercase tracking-widest font-display">Vista Previa Snapshot</h4>
                   <div className="flex items-center gap-4">
+                    <div className="flex items-center gap-2 px-2 py-1 bg-brand-primary/5 border border-brand-primary/20 rounded-lg">
+                      <span className="text-[10px] text-brand-primary font-mono whitespace-nowrap">
+                        ~{(generateAIContext().length / 4).toLocaleString()} TOKENS
+                      </span>
+                    </div>
                     <button 
                       onClick={() => handleDownloadFile(generateAIContext(), "snapshot_completo.txt", "text/plain")}
                       className="text-[10px] font-bold text-brand-secondary hover:underline uppercase flex items-center gap-1"
@@ -1113,6 +1169,79 @@ ${context}`,
                     <div className="text-lg font-bold text-brand-secondary font-mono">{selectedNode.data.importance}</div>
                   </div>
                </div>
+            </div>
+
+            {/* Relations Section */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+              <div className="space-y-4">
+                <div className="text-[10px] font-bold text-gray-500 uppercase tracking-[0.2em] flex items-center gap-2">
+                  <Share2 className="w-4 h-4 text-brand-primary" /> Dependencias (Salientes)
+                </div>
+                <div className="bg-white/[0.02] border border-white/5 rounded-3xl p-6 min-h-[160px] max-h-[300px] overflow-y-auto custom-scrollbar">
+                  {projectData.links.filter(l => (typeof l.source === 'string' ? l.source : (l.source as any).id) === selectedNode.id).length > 0 ? (
+                    <div className="space-y-2">
+                      {projectData.links
+                        .filter(l => (typeof l.source === 'string' ? l.source : (l.source as any).id) === selectedNode.id)
+                        .map((l, i) => {
+                          const targetId = typeof l.target === 'string' ? l.target : (l.target as any).id;
+                          const target = projectData.nodes.find(n => n.id === targetId);
+                          return (
+                            <button
+                              key={i}
+                              onClick={() => target && setSelectedNode(target)}
+                              className="w-full text-left p-3 rounded-xl bg-white/5 border border-white/5 hover:border-brand-primary/50 transition-all flex items-center justify-between group"
+                            >
+                              <span className="text-sm text-gray-300 truncate pr-4">{target?.label || targetId}</span>
+                              <ChevronRight className="w-4 h-4 text-brand-primary opacity-0 group-hover:opacity-100 transition-all" />
+                            </button>
+                          );
+                        })}
+                    </div>
+                  ) : (
+                    <div className="h-full flex flex-col items-center justify-center text-center p-4">
+                      <div className="w-10 h-10 rounded-full bg-gray-900 flex items-center justify-center text-gray-700 mb-2">
+                        <AlertCircle className="w-5 h-5" />
+                      </div>
+                      <p className="text-xs text-gray-600 italic">Este archivo no importa módulos internos detectados.</p>
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              <div className="space-y-4">
+                <div className="text-[10px] font-bold text-gray-500 uppercase tracking-[0.2em] flex items-center gap-2">
+                  <Network className="w-4 h-4 text-brand-secondary" /> Dependientes (Entrantes)
+                </div>
+                <div className="bg-white/[0.02] border border-white/5 rounded-3xl p-6 min-h-[160px] max-h-[300px] overflow-y-auto custom-scrollbar">
+                  {projectData.links.filter(l => (typeof l.target === 'string' ? l.target : (l.target as any).id) === selectedNode.id).length > 0 ? (
+                    <div className="space-y-2">
+                      {projectData.links
+                        .filter(l => (typeof l.target === 'string' ? l.target : (l.target as any).id) === selectedNode.id)
+                        .map((l, i) => {
+                          const sourceId = typeof l.source === 'string' ? l.source : (l.source as any).id;
+                          const source = projectData.nodes.find(n => n.id === sourceId);
+                          return (
+                            <button
+                              key={i}
+                              onClick={() => source && setSelectedNode(source)}
+                              className="w-full text-left p-3 rounded-xl bg-white/5 border border-white/5 hover:border-brand-secondary/50 transition-all flex items-center justify-between group"
+                            >
+                              <span className="text-sm text-gray-300 truncate pr-4">{source?.label || sourceId}</span>
+                              <ChevronRight className="w-4 h-4 text-brand-secondary opacity-0 group-hover:opacity-100 transition-all" />
+                            </button>
+                          );
+                        })}
+                    </div>
+                  ) : (
+                    <div className="h-full flex flex-col items-center justify-center text-center p-4">
+                      <div className="w-10 h-10 rounded-full bg-gray-900 flex items-center justify-center text-gray-700 mb-2">
+                        <AlertCircle className="w-5 h-5" />
+                      </div>
+                      <p className="text-xs text-gray-600 italic">Ningún otro archivo interno parece depender de este.</p>
+                    </div>
+                  )}
+                </div>
+              </div>
             </div>
 
             <div>
