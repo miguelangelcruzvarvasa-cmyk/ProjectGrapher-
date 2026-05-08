@@ -8,9 +8,10 @@ interface GraphCanvasProps {
   links: GraphLink[];
   onNodeClick: (node: GraphNode) => void;
   selectedNodeId: string | null;
+  isFocusMode: boolean;
 }
 
-export const GraphCanvas: React.FC<GraphCanvasProps> = ({ nodes, links, onNodeClick, selectedNodeId }) => {
+export const GraphCanvas: React.FC<GraphCanvasProps> = ({ nodes, links, onNodeClick, selectedNodeId, isFocusMode }) => {
   const svgRef = useRef<SVGSVGElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
 
@@ -151,33 +152,61 @@ export const GraphCanvas: React.FC<GraphCanvasProps> = ({ nodes, links, onNodeCl
 
     // Interaction Effects: Highlight connected edges
     const updateHighlights = () => {
-      if (!selectedNodeId) {
-        link.attr('stroke', '#374151').attr('stroke-opacity', 0.3).attr('stroke-width', 1);
-        node.attr('opacity', 1);
+      // Create a grayscale filter if it doesn't exist
+      if (svg.select('#grayscale').empty()) {
+        svg.append('defs').append('filter').attr('id', 'grayscale')
+          .append('feColorMatrix')
+          .attr('type', 'matrix')
+          .attr('values', '0.3333 0.3333 0.3333 0 0 0.3333 0.3333 0.3333 0 0 0.3333 0.3333 0.3333 0 0 0 0 0 1 0');
+      }
+
+      const activeFocusId = selectedNodeId;
+
+      if (!activeFocusId) {
+        link.transition().duration(400)
+          .attr('stroke', '#374151')
+          .attr('stroke-opacity', 0.3)
+          .attr('stroke-width', 1);
+        node.transition().duration(400)
+          .attr('opacity', 1)
+          .style('filter', 'none');
+        node.selectAll('text').transition().duration(400).attr('opacity', 1);
         return;
       }
 
-      const connectedNodes = new Set<string>([selectedNodeId]);
+      const connectedNodes = new Set<string>([activeFocusId]);
       links.forEach(l => {
         const sId = typeof l.source === 'string' ? l.source : (l.source as any).id;
         const tId = typeof l.target === 'string' ? l.target : (l.target as any).id;
-        if (sId === selectedNodeId) connectedNodes.add(tId);
-        if (tId === selectedNodeId) connectedNodes.add(sId);
+        const sIdStr = typeof sId === 'object' ? sId.id : sId;
+        const tIdStr = typeof tId === 'object' ? tId.id : tId;
+        
+        if (sIdStr === activeFocusId) connectedNodes.add(tIdStr);
+        if (tIdStr === activeFocusId) connectedNodes.add(sIdStr);
       });
 
       link.each(function(l: any) {
-        const sId = l.source.id;
-        const tId = l.target.id;
-        const isConnected = sId === selectedNodeId || tId === selectedNodeId;
+        const sId = l.source.id || l.source;
+        const tId = l.target.id || l.target;
+        const isConnected = sId === activeFocusId || tId === activeFocusId;
         d3.select(this)
-          .transition().duration(200)
-          .attr('stroke', isConnected ? '#6366f1' : '#1f2937')
-          .attr('stroke-opacity', isConnected ? 0.8 : 0.1)
-          .attr('stroke-width', isConnected ? 2 : 1);
+          .transition().duration(300)
+          .attr('stroke', isConnected ? '#6366f1' : '#111827')
+          .attr('stroke-opacity', isConnected ? (isFocusMode ? 1 : 0.8) : 0.05)
+          .attr('stroke-width', isConnected ? (isFocusMode ? 2.5 : 2) : 0.5);
       });
 
-      node.transition().duration(200)
-        .attr('opacity', (d: any) => connectedNodes.has(d.id) ? 1 : 0.2);
+      node.transition().duration(300)
+        .attr('opacity', (d: any) => connectedNodes.has(d.id) ? 1 : (isFocusMode ? 0.05 : 0.1))
+        .style('filter', (d: any) => {
+          if (d.id === activeFocusId) return 'drop-shadow(0 0 15px rgba(99, 102, 241, 0.8))';
+          return connectedNodes.has(d.id) ? 'none' : 'url(#grayscale)';
+        });
+
+      // Hide text for non-connected nodes to reduce clutter
+      node.selectAll('text')
+        .transition().duration(300)
+        .attr('opacity', (d: any) => connectedNodes.has(d.id) ? 1 : 0);
     };
 
     updateHighlights();
@@ -234,7 +263,7 @@ export const GraphCanvas: React.FC<GraphCanvasProps> = ({ nodes, links, onNodeCl
     return () => {
       simulation.stop();
     };
-  }, [nodes, links, selectedNodeId, onNodeClick]);
+  }, [nodes, links, selectedNodeId, isFocusMode, onNodeClick]);
 
   return (
     <div ref={containerRef} className="w-full h-full bg-brand-bg relative overflow-hidden select-none">
