@@ -1,0 +1,6 @@
+{
+  "name": "ProjectGrapher AI",
+  "description": "Software architecture analyzer with D3.js visualization and AI insights. Supports offline use (PWA) and local processing.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["File System Analysis", "Data Visualization", "AI Prompt Engineering"]
+}
