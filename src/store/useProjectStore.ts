@@ -106,6 +106,39 @@ type ErrorContextPackData = {
   modelPrompt: string;
 };
 
+type SemanticSearchResult = {
+  query: string;
+  summary: string;
+  primaryFiles: TaskPackFileCandidate[];
+  relatedFiles: TaskPackFileCandidate[];
+};
+
+type ImpactedFile = {
+  path: string;
+  relation: 'depends_on' | 'used_by' | 'second_order';
+  importance: number;
+  reasons: string[];
+};
+
+type ImpactAnalysisData = {
+  targetPath: string;
+  summary: string;
+  directDependencies: ImpactedFile[];
+  directDependents: ImpactedFile[];
+  secondaryImpact: ImpactedFile[];
+};
+
+type SmartDiffData = {
+  projectName: string;
+  baselineLabel: string;
+  currentLabel: string;
+  addedFiles: string[];
+  removedFiles: string[];
+  addedRelations: string[];
+  removedRelations: string[];
+  summary: string;
+};
+
 const getTopItems = (items: string[], limit: number) =>
   items.filter(Boolean).slice(0, limit).join(', ') || 'N/A';
 
@@ -1085,11 +1118,130 @@ const buildErrorContextPack = (projectData: ProjectData, insights: ProjectInsigh
   return text;
 };
 
+const buildImpactAnalysisData = (projectData: ProjectData, projectName: string, nodeId: string): ImpactAnalysisData | null => {
+  const node = projectData.nodes.find((item) => item.id === nodeId);
+  const file = projectData.files.find((item) => item.id === nodeId);
+  if (!node || !file) return null;
+
+  const rootPath = (path: string) => withProjectRoot(projectName, path);
+  const directDependencies: ImpactedFile[] = [];
+  const directDependents: ImpactedFile[] = [];
+  const secondaryMap = new Map<string, ImpactedFile>();
+
+  const outgoing = projectData.links.filter((link) => {
+    const sourceId = typeof link.source === 'object' ? (link.source as any).id : link.source;
+    return sourceId === nodeId;
+  });
+
+  const incoming = projectData.links.filter((link) => {
+    const targetId = typeof link.target === 'object' ? (link.target as any).id : link.target;
+    return targetId === nodeId;
+  });
+
+  outgoing.forEach((link) => {
+    const targetId = typeof link.target === 'object' ? (link.target as any).id : link.target;
+    const targetFile = projectData.files.find((item) => item.id === targetId);
+    if (!targetFile) return;
+    directDependencies.push({
+      path: rootPath(targetFile.path),
+      relation: 'depends_on',
+      importance: targetFile.importance || 0,
+      reasons: ['El archivo seleccionado depende directamente de este módulo']
+    });
+  });
+
+  const dependentIds: string[] = [];
+  incoming.forEach((link) => {
+    const sourceId = typeof link.source === 'object' ? (link.source as any).id : link.source;
+    const sourceFile = projectData.files.find((item) => item.id === sourceId);
+    if (!sourceFile) return;
+    dependentIds.push(sourceId);
+    directDependents.push({
+      path: rootPath(sourceFile.path),
+      relation: 'used_by',
+      importance: sourceFile.importance || 0,
+      reasons: ['Este módulo consume o invoca al archivo seleccionado']
+    });
+  });
+
+  dependentIds.forEach((dependentId) => {
+    projectData.links.forEach((link) => {
+      const sourceId = typeof link.source === 'object' ? (link.source as any).id : link.source;
+      const targetId = typeof link.target === 'object' ? (link.target as any).id : link.target;
+      if (sourceId !== dependentId || targetId === nodeId) return;
+      const targetFile = projectData.files.find((item) => item.id === targetId);
+      if (!targetFile) return;
+      if (!secondaryMap.has(targetId)) {
+        secondaryMap.set(targetId, {
+          path: rootPath(targetFile.path),
+          relation: 'second_order',
+          importance: targetFile.importance || 0,
+          reasons: ['Podría verse afectado en cascada por un consumidor directo del archivo']
+        });
+      }
+    });
+  });
+
+  const summary = `${rootPath(file.path)} tiene ${directDependencies.length} dependencias directas, ${directDependents.length} consumidores directos y ${secondaryMap.size} posibles impactos secundarios.`;
+
+  return {
+    targetPath: rootPath(file.path),
+    summary,
+    directDependencies: directDependencies.sort((a, b) => b.importance - a.importance).slice(0, 8),
+    directDependents: directDependents.sort((a, b) => b.importance - a.importance).slice(0, 8),
+    secondaryImpact: Array.from(secondaryMap.values()).sort((a, b) => b.importance - a.importance).slice(0, 8)
+  };
+};
+
+const buildSemanticSearchResults = (projectData: ProjectData, projectName: string, query: string): SemanticSearchResult => {
+  const insights = extractProjectInsights(projectData, projectName);
+  const pack = buildTaskPackData(projectData, insights, query);
+  return {
+    query: pack.task,
+    summary: pack.projectSummary,
+    primaryFiles: pack.primaryFiles,
+    relatedFiles: pack.relatedFiles
+  };
+};
+
+const buildSmartDiffData = (previousProject: ProjectData, currentProject: ProjectData, projectName: string, baselineLabel: string, currentLabel: string): SmartDiffData => {
+  const previousFiles = new Set(previousProject.files.map((file) => file.path));
+  const currentFiles = new Set(currentProject.files.map((file) => file.path));
+  const previousRelations = new Set(previousProject.links.map((link) => {
+    const sourceId = typeof link.source === 'object' ? (link.source as any).id : link.source;
+    const targetId = typeof link.target === 'object' ? (link.target as any).id : link.target;
+    return `${sourceId} -> ${targetId}`;
+  }));
+  const currentRelations = new Set(currentProject.links.map((link) => {
+    const sourceId = typeof link.source === 'object' ? (link.source as any).id : link.source;
+    const targetId = typeof link.target === 'object' ? (link.target as any).id : link.target;
+    return `${sourceId} -> ${targetId}`;
+  }));
+
+  const addedFiles = Array.from(currentFiles).filter((path) => !previousFiles.has(path)).map((path) => withProjectRoot(projectName, path));
+  const removedFiles = Array.from(previousFiles).filter((path) => !currentFiles.has(path)).map((path) => withProjectRoot(projectName, path));
+  const addedRelations = Array.from(currentRelations).filter((item) => !previousRelations.has(item)).slice(0, 12);
+  const removedRelations = Array.from(previousRelations).filter((item) => !currentRelations.has(item)).slice(0, 12);
+
+  return {
+    projectName,
+    baselineLabel,
+    currentLabel,
+    addedFiles: addedFiles.slice(0, 12),
+    removedFiles: removedFiles.slice(0, 12),
+    addedRelations,
+    removedRelations,
+    summary: `Comparación contra ${baselineLabel}: ${addedFiles.length} archivos nuevos, ${removedFiles.length} archivos removidos, ${addedRelations.length} relaciones nuevas y ${removedRelations.length} relaciones removidas.`
+  };
+};
+
 interface ProjectState {
   projectData: ProjectData | null;
   projectName: string;
   skippedCount: number;
   selectedNode: GraphNode | null;
+  smartDiffData: SmartDiffData | null;
+  projectMemory: Record<string, { globalNote: string; fileNotes: Record<string, string> }>;
   isProcessing: boolean;
   isReviewing: boolean;
   searchQuery: string;
@@ -1116,6 +1268,8 @@ interface ProjectState {
   setTreeSearch: (query: string) => void;
   setActiveTab: (tab: 'details' | 'context' | 'files' | 'ia' | 'settings') => void;
   setIsFocusMode: (mode: boolean) => void;
+  setProjectGlobalMemory: (note: string) => void;
+  setProjectFileMemory: (filePath: string, note: string) => void;
   setAiProvider: (provider: 'gemini' | 'openai' | 'groq' | 'deepseek' | 'ollama' | 'openrouter' | 'mistral' | 'custom') => void;
   setAiModel: (model: string) => void;
   setCustomUrl: (url: string) => void;
@@ -1137,6 +1291,8 @@ interface ProjectState {
   generateTaskPack: (task: string) => string;
   generateErrorContextPackData: (rawError: string) => ErrorContextPackData | null;
   generateErrorContextPack: (rawError: string) => string;
+  generateSemanticSearchResults: (query: string) => SemanticSearchResult | null;
+  generateImpactAnalysisData: (nodeId: string) => ImpactAnalysisData | null;
   generateProjectBrief: () => string;
   generateProjectMetadata: () => string;
   generateGraphGuide: () => string;
@@ -1145,6 +1301,7 @@ interface ProjectState {
   generateAIArchitectureNarrative: () => string;
   generateAIRefactorPriorities: () => string;
   generateAIAgentHandoff: (task: string) => string;
+  refreshSmartDiff: () => Promise<void>;
   closeProject: () => void;
 }
 
@@ -1155,6 +1312,8 @@ export const useProjectStore = create<ProjectState>()(
       projectName: '',
       skippedCount: 0,
       selectedNode: null,
+      smartDiffData: null,
+      projectMemory: {},
       isProcessing: false,
       isReviewing: false,
       searchQuery: '',
@@ -1181,6 +1340,37 @@ export const useProjectStore = create<ProjectState>()(
       setTreeSearch: (query) => set({ treeSearch: query }),
       setActiveTab: (tab) => set({ activeTab: tab }),
       setIsFocusMode: (mode) => set({ isFocusMode: mode }),
+      setProjectGlobalMemory: (note) => {
+        const { projectName, projectMemory } = get();
+        if (!projectName) return;
+        const existing = projectMemory[projectName] || { globalNote: '', fileNotes: {} };
+        set({
+          projectMemory: {
+            ...projectMemory,
+            [projectName]: {
+              ...existing,
+              globalNote: note
+            }
+          }
+        });
+      },
+      setProjectFileMemory: (filePath, note) => {
+        const { projectName, projectMemory } = get();
+        if (!projectName) return;
+        const existing = projectMemory[projectName] || { globalNote: '', fileNotes: {} };
+        set({
+          projectMemory: {
+            ...projectMemory,
+            [projectName]: {
+              ...existing,
+              fileNotes: {
+                ...existing.fileNotes,
+                [filePath]: note
+              }
+            }
+          }
+        });
+      },
       setAiProvider: (provider) => {
         const { customKeys } = get();
         set({
@@ -1236,11 +1426,36 @@ export const useProjectStore = create<ProjectState>()(
           projectName: '', 
           skippedCount: 0, 
           selectedNode: null,
+          smartDiffData: null,
           aiReview: null,
           aiError: null,
           activeTab: 'details'
         });
         await db.projects.clear();
+      },
+
+      refreshSmartDiff: async () => {
+        const { projectData, projectName } = get();
+        if (!projectData || !projectName) {
+          set({ smartDiffData: null });
+          return;
+        }
+
+        const history = (await db.projects.orderBy('timestamp').reverse().toArray())
+          .filter((item) => item.name === projectName);
+
+        if (history.length < 2) {
+          set({ smartDiffData: null });
+          return;
+        }
+
+        const currentRecord = history[0];
+        const previousRecord = history[1];
+        const baselineLabel = new Date(previousRecord.timestamp).toLocaleString();
+        const currentLabel = new Date(currentRecord.timestamp).toLocaleString();
+        set({
+          smartDiffData: buildSmartDiffData(previousRecord.data, currentRecord.data, projectName, baselineLabel, currentLabel)
+        });
       },
 
       performDeepAnalysis: async () => {
@@ -1300,11 +1515,12 @@ export const useProjectStore = create<ProjectState>()(
         const lastProject = await db.projects.orderBy('timestamp').last();
         if (lastProject) {
           set({ projectData: lastProject.data, projectName: lastProject.name || '' });
+          await get().refreshSmartDiff();
         }
       },
 
       processFiles: async (fileList: FileList) => {
-        set({ isProcessing: true, projectData: null, selectedNode: null, skippedCount: 0 });
+        set({ isProcessing: true, projectData: null, selectedNode: null, skippedCount: 0, smartDiffData: null });
 
         const firstFile = fileList.item(0);
         if (!firstFile) {
@@ -1379,6 +1595,7 @@ export const useProjectStore = create<ProjectState>()(
           });
           
           worker.terminate();
+          await get().refreshSmartDiff();
           await get().performDeepAnalysis();
         };
 
@@ -1654,6 +1871,20 @@ export const useProjectStore = create<ProjectState>()(
         const projectName = get().projectName || 'Unknown Project';
         const insights = extractProjectInsights(projectData, projectName);
         return buildErrorContextPack(projectData, insights, rawError);
+      },
+
+      generateSemanticSearchResults: (query: string) => {
+        const { projectData } = get();
+        if (!projectData) return null;
+        const projectName = get().projectName || 'Unknown Project';
+        return buildSemanticSearchResults(projectData, projectName, query);
+      },
+
+      generateImpactAnalysisData: (nodeId: string) => {
+        const { projectData } = get();
+        if (!projectData) return null;
+        const projectName = get().projectName || 'Unknown Project';
+        return buildImpactAnalysisData(projectData, projectName, nodeId);
       },
 
       generateProjectBrief: () => {
@@ -2005,12 +2236,14 @@ export const useProjectStore = create<ProjectState>()(
         customUrl: state.customUrl,
         customKey: state.customKey,
         customKeys: state.customKeys,
-        useDeepAnalysis: state.useDeepAnalysis
+        useDeepAnalysis: state.useDeepAnalysis,
+        projectMemory: state.projectMemory
       }),
       merge: (persistedState, currentState) => {
         const persisted = (persistedState as Partial<ProjectState>) || {};
         const provider = persisted.aiProvider || currentState.aiProvider;
         const persistedCustomKeys = persisted.customKeys || {};
+        const persistedProjectMemory = persisted.projectMemory || {};
         const resolvedCustomKeys = {
           ...currentState.customKeys,
           ...persistedCustomKeys
@@ -2019,6 +2252,10 @@ export const useProjectStore = create<ProjectState>()(
         return {
           ...currentState,
           ...persisted,
+          projectMemory: {
+            ...currentState.projectMemory,
+            ...persistedProjectMemory
+          },
           customKeys: resolvedCustomKeys,
           customKey: resolvedCustomKeys[provider] || ''
         };

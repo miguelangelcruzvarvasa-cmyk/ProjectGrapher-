@@ -32,15 +32,15 @@ function cn(...inputs: ClassValue[]) {
 
 export default function App() {
   const {
-    projectData, skippedCount, selectedNode, isProcessing, isReviewing,
+    projectData, skippedCount, selectedNode, smartDiffData, projectMemory, isProcessing, isReviewing,
     searchQuery, treeSearch, activeTab, isFocusMode, aiReview, aiError,
     showFileModal, showIAModal,
     setProjectData, setSelectedNode, setSearchQuery, setTreeSearch,
     setActiveTab, setIsFocusMode, processFiles, loadLastProject,
-    generateAIReview, generateAIContext, generateExecutiveView, generateSystemView, generateHotspotReport, generateTaskPackData, generateTaskPack, generateErrorContextPackData, generateErrorContextPack, generateProjectBrief, generateProjectMetadata, generateGraphGuide, generateTreeOnly, setShowFileModal, setShowIAModal,
+    generateAIReview, generateAIContext, generateExecutiveView, generateSystemView, generateHotspotReport, generateTaskPackData, generateTaskPack, generateErrorContextPackData, generateErrorContextPack, generateSemanticSearchResults, generateImpactAnalysisData, generateProjectBrief, generateProjectMetadata, generateGraphGuide, generateTreeOnly, setShowFileModal, setShowIAModal,
     generateAIVisionDocument, generateAIArchitectureNarrative, generateAIRefactorPriorities, generateAIAgentHandoff,
     aiProvider, aiModel, customUrl, customKey, envKeys, checkEnvKeys,
-    setAiProvider, setAiModel, setCustomUrl, setCustomKey, projectName,
+    setAiProvider, setAiModel, setCustomUrl, setCustomKey, setProjectGlobalMemory, setProjectFileMemory, projectName,
     closeProject
   } = useProjectStore();
 
@@ -51,6 +51,7 @@ export default function App() {
   const [showMobilePanel, setShowMobilePanel] = useState(false);
   const [agentTask, setAgentTask] = useState('Ajusta el perfil del usuario y encuentra los archivos que debo modificar.');
   const [errorTraceInput, setErrorTraceInput] = useState('TypeError: Cannot read properties of undefined (reading \'map\')\n    at src/components/GraphCanvas.tsx:128:18\n    at src/App.tsx:512:7');
+  const [semanticQuery, setSemanticQuery] = useState('dónde vive autenticación');
   const [exportSection, setExportSection] = useState<'guided' | 'task' | 'errors' | 'ai' | 'exports'>('guided');
   const [isSavingAIDocs, setIsSavingAIDocs] = useState(false);
   const [aiDocsSaveStatus, setAIDocsSaveStatus] = useState<string | null>(null);
@@ -223,6 +224,10 @@ export default function App() {
   const taskPackPreview = generateTaskPack(agentTask);
   const errorContextPackData = generateErrorContextPackData(errorTraceInput);
   const errorContextPackPreview = generateErrorContextPack(errorTraceInput);
+  const semanticSearchResults = generateSemanticSearchResults(semanticQuery);
+  const impactAnalysisData = selectedNode ? generateImpactAnalysisData(selectedNode.id) : null;
+  const activeProjectMemory = projectMemory[projectName || ''] || { globalNote: '', fileNotes: {} };
+  const selectedNodeMemory = selectedNode ? (activeProjectMemory.fileNotes[selectedNode.id] || '') : '';
 
   const focusNodeByProjectPath = useCallback((projectPath: string) => {
     if (!projectData || !projectPath) return;
@@ -577,6 +582,52 @@ export default function App() {
                         <div className="text-2xl font-mono font-bold text-brand-secondary lowercase">{selectedNode.group}</div>
                       </div>
                     </div>
+
+                    {impactAnalysisData && (
+                      <div className="space-y-4 rounded-3xl border border-amber-500/20 bg-amber-500/5 p-4">
+                        <div>
+                          <div className="text-[10px] font-black uppercase tracking-[0.2em] text-amber-400">Predictive Impact</div>
+                          <p className="mt-2 text-sm text-gray-300">{impactAnalysisData.summary}</p>
+                        </div>
+
+                        <div className="space-y-2">
+                          <div className="text-[10px] font-black uppercase tracking-[0.2em] text-gray-500">Consumidores directos</div>
+                          {impactAnalysisData.directDependents.length ? impactAnalysisData.directDependents.slice(0, 4).map((item) => (
+                            <div key={item.path} className="rounded-2xl border border-white/6 bg-black/20 p-3">
+                              <div className="break-all font-mono text-xs text-white">{item.path}</div>
+                              <div className="mt-1 text-[11px] text-gray-500">{item.reasons[0]}</div>
+                            </div>
+                          )) : (
+                            <div className="text-xs text-gray-500">No se detectaron consumidores directos.</div>
+                          )}
+                        </div>
+
+                        <div className="space-y-2">
+                          <div className="text-[10px] font-black uppercase tracking-[0.2em] text-gray-500">Dependencias directas</div>
+                          {impactAnalysisData.directDependencies.length ? impactAnalysisData.directDependencies.slice(0, 4).map((item) => (
+                            <div key={item.path} className="rounded-2xl border border-white/6 bg-black/20 p-3">
+                              <div className="break-all font-mono text-xs text-white">{item.path}</div>
+                              <div className="mt-1 text-[11px] text-gray-500">{item.reasons[0]}</div>
+                            </div>
+                          )) : (
+                            <div className="text-xs text-gray-500">No se detectaron dependencias directas.</div>
+                          )}
+                        </div>
+                      </div>
+                    )}
+
+                    <div className="space-y-3 rounded-3xl border border-emerald-500/15 bg-emerald-500/5 p-4">
+                      <div className="text-[10px] font-black uppercase tracking-[0.2em] text-emerald-400">Project Memory</div>
+                      <p className="text-xs leading-relaxed text-gray-400">Guarda notas locales sobre este archivo para futuras sesiones.</p>
+                      <textarea
+                        value={selectedNodeMemory}
+                        onChange={(e) => setProjectFileMemory(selectedNode.id, e.target.value)}
+                        rows={4}
+                        placeholder="Ejemplo: este archivo es crítico, no tocar el flujo de sesión sin revisar auth y middleware."
+                        className="w-full rounded-2xl border border-gray-800 bg-black/30 px-4 py-3 text-sm text-white outline-none transition-colors focus:border-emerald-500"
+                      />
+                    </div>
+
                     <button
                       onClick={() => setShowFileModal(true)}
                       className="w-full py-4 bg-white/5 border border-white/10 rounded-2xl text-white font-bold hover:bg-white/10 transition-all flex items-center justify-center gap-2"
@@ -628,6 +679,82 @@ export default function App() {
                     <p className="text-xs text-gray-400 leading-relaxed relative z-10">
                       Estás viendo un mapeo <strong className="font-semibold text-white">100% determinista</strong> generado mediante el análisis estático de dependencias (AST). Este proceso no utiliza IA, garantizando precisión técnica absoluta en la estructura del grafo.
                     </p>
+                  </div>
+
+                  <div className="space-y-4 rounded-3xl border border-cyan-500/15 bg-cyan-500/5 p-6">
+                    <div>
+                      <div className="text-[10px] font-black uppercase tracking-[0.22em] text-cyan-400">Semantic Search</div>
+                      <h4 className="mt-2 text-lg font-bold text-white">Busca por intención</h4>
+                      <p className="mt-1 text-xs leading-relaxed text-gray-400">No solo por nombre de archivo. Usa el scoring semántico del proyecto para encontrar módulos relevantes.</p>
+                    </div>
+                    <input
+                      type="text"
+                      value={semanticQuery}
+                      onChange={(e) => setSemanticQuery(e.target.value)}
+                      placeholder="Ejemplo: dónde vive autenticación"
+                      className="w-full rounded-2xl border border-gray-800 bg-black/30 px-4 py-3 text-sm text-white outline-none transition-colors focus:border-cyan-500"
+                    />
+                    {semanticSearchResults && (
+                      <div className="space-y-3">
+                        <p className="text-sm text-gray-300">{semanticSearchResults.summary}</p>
+                        <div className="space-y-2">
+                          {semanticSearchResults.primaryFiles.slice(0, 5).map((file) => (
+                            <button
+                              key={file.path}
+                              onClick={() => focusNodeByProjectPath(file.path)}
+                              className="block w-full rounded-2xl border border-white/6 bg-black/20 p-3 text-left transition-colors hover:border-cyan-500/40"
+                            >
+                              <div className="break-all font-mono text-xs text-white">{file.path}</div>
+                              <div className="mt-1 text-[11px] text-gray-500">{file.reasons[0]}</div>
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="space-y-4 rounded-3xl border border-violet-500/15 bg-violet-500/5 p-6">
+                    <div>
+                      <div className="text-[10px] font-black uppercase tracking-[0.22em] text-violet-400">Smart Diff Context</div>
+                      <h4 className="mt-2 text-lg font-bold text-white">Comparación contra la corrida anterior</h4>
+                    </div>
+                    {smartDiffData ? (
+                      <div className="space-y-3">
+                        <p className="text-sm text-gray-300">{smartDiffData.summary}</p>
+                        <div className="grid grid-cols-1 gap-3">
+                          <div className="rounded-2xl border border-white/6 bg-black/20 p-3">
+                            <div className="text-[10px] font-black uppercase tracking-[0.2em] text-gray-500">Archivos nuevos</div>
+                            <div className="mt-2 space-y-1">
+                              {smartDiffData.addedFiles.length ? smartDiffData.addedFiles.slice(0, 5).map((path) => (
+                                <div key={path} className="break-all font-mono text-xs text-white">{path}</div>
+                              )) : <div className="text-xs text-gray-500">Sin cambios nuevos detectados.</div>}
+                            </div>
+                          </div>
+                          <div className="rounded-2xl border border-white/6 bg-black/20 p-3">
+                            <div className="text-[10px] font-black uppercase tracking-[0.2em] text-gray-500">Relaciones nuevas</div>
+                            <div className="mt-2 space-y-1">
+                              {smartDiffData.addedRelations.length ? smartDiffData.addedRelations.slice(0, 5).map((relation) => (
+                                <div key={relation} className="break-all font-mono text-xs text-white">{relation}</div>
+                              )) : <div className="text-xs text-gray-500">No se detectaron relaciones nuevas.</div>}
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    ) : (
+                      <p className="text-xs leading-relaxed text-gray-500">Todavía no hay una corrida previa del mismo proyecto para comparar. Cuando cargues una nueva versión local, aquí aparecerá el diff estructural.</p>
+                    )}
+                  </div>
+
+                  <div className="space-y-3 rounded-3xl border border-emerald-500/15 bg-emerald-500/5 p-6">
+                    <div className="text-[10px] font-black uppercase tracking-[0.22em] text-emerald-400">Project Memory</div>
+                    <p className="text-xs leading-relaxed text-gray-400">Notas persistentes del proyecto completas, no ligadas a un archivo concreto.</p>
+                    <textarea
+                      value={activeProjectMemory.globalNote}
+                      onChange={(e) => setProjectGlobalMemory(e.target.value)}
+                      rows={4}
+                      placeholder="Ejemplo: módulo legacy, revisar auth antes de tocar login, evitar cambiar el flujo de sesiones sin validar middleware."
+                      className="w-full rounded-2xl border border-gray-800 bg-black/30 px-4 py-3 text-sm text-white outline-none transition-colors focus:border-emerald-500"
+                    />
                   </div>
                 </div>
               )}
@@ -1108,12 +1235,12 @@ export default function App() {
                             <Code2 className="w-6 h-6 text-amber-400" />
                          </div>
                          <div>
-                            <h4 className="text-white font-bold">Ficha Técnica JSON</h4>
-                            <p className="text-xs text-gray-500">Lenguajes, stack, capas y hotspots</p>
+                            <h4 className="text-white font-bold">Resumen Técnico JSON</h4>
+                            <p className="text-xs text-gray-500">Ficha local de stack, capas y hotspots</p>
                          </div>
                       </div>
                       <button 
-                        onClick={() => handleDownloadFile(generateProjectMetadata(), `${projectName}_metadata.json`, 'application/json')}
+                        onClick={() => handleDownloadFile(generateProjectMetadata(), `${projectName}_project_summary.json`, 'application/json')}
                         className="p-3 text-gray-500 hover:text-white transition-colors"
                       >
                          <Download className="w-6 h-6" />
@@ -1144,12 +1271,12 @@ export default function App() {
                             <Network className="w-6 h-6 text-brand-secondary" />
                          </div>
                          <div>
-                            <h4 className="text-white font-bold">Grafo de Dependencias</h4>
-                            <p className="text-xs text-gray-500">JSON estructural</p>
+                            <h4 className="text-white font-bold">Mapa Arquitectónico JSON</h4>
+                            <p className="text-xs text-gray-500">Relaciones locales entre archivos</p>
                          </div>
                       </div>
                       <button 
-                        onClick={() => handleDownloadFile(JSON.stringify(projectData, null, 2), `${projectName}_graph.json`, 'application/json')}
+                        onClick={() => handleDownloadFile(JSON.stringify(projectData, null, 2), `${projectName}_architecture_map.json`, 'application/json')}
                         className="p-3 text-gray-500 hover:text-white transition-colors"
                       >
                          <Download className="w-6 h-6" />

@@ -119,8 +119,9 @@ ProjectGrapher puede generar archivos como:
 - `*_hotspots.md`
 - `*_task_pack.md`
 - `*_brief.md`
-- `*_metadata.json`
+- `*_project_summary.json`
 - `*_graph_guide.md`
+- `*_architecture_map.json`
 - `*_vision_ai.md`
 - `*_architecture_narrative_ai.md`
 - `*_refactor_priorities_ai.md`
