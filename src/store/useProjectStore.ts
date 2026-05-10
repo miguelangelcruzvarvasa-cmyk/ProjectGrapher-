@@ -6,6 +6,7 @@ import { db } from '../db/projectDB';
 
 const MAX_GRAPH_FILES = 1500;
 const FILE_READ_BATCH_SIZE = 40;
+const FILE_SCAN_BATCH_SIZE = 500;
 
 const prioritizeFile = (path: string, name: string) => {
   const normalizedPath = path.toLowerCase();
@@ -35,6 +36,11 @@ const readFileAsText = (file: File) =>
     reader.onload = (e) => resolve((e.target?.result as string) || '');
     reader.onerror = () => resolve('');
     reader.readAsText(file);
+  });
+
+const yieldToBrowser = () =>
+  new Promise<void>((resolve) => {
+    window.setTimeout(resolve, 0);
   });
 
 type ProjectInsights = {
@@ -944,27 +950,47 @@ export const useProjectStore = create<ProjectState>()(
 
       processFiles: async (fileList: FileList) => {
         set({ isProcessing: true, projectData: null, selectedNode: null, skippedCount: 0 });
-        
-        const filesArray = Array.from(fileList);
-        const projectName = (filesArray[0] as any).webkitRelativePath.split('/')[0] || "Project";
+
+        const firstFile = fileList.item(0);
+        if (!firstFile) {
+          set({ isProcessing: false });
+          return;
+        }
+
+        const projectName = (firstFile as any).webkitRelativePath.split('/')[0] || "Project";
         set({ projectName });
 
-        const candidateFiles = filesArray
-          .map((file) => ({
-            file,
-            path: (file as any).webkitRelativePath || file.name,
-            name: file.name,
-            size: file.size
-          }))
-          .filter((item) => shouldProcessFile(item.path, item.size))
-          .sort((a, b) => {
-            const priorityDiff = prioritizeFile(a.path, a.name) - prioritizeFile(b.path, b.name);
-            if (priorityDiff !== 0) return priorityDiff;
-            return a.path.localeCompare(b.path);
-          });
+        const candidateFiles: { file: File; path: string; name: string; size: number }[] = [];
+
+        for (let index = 0; index < fileList.length; index += FILE_SCAN_BATCH_SIZE) {
+          const limit = Math.min(index + FILE_SCAN_BATCH_SIZE, fileList.length);
+
+          for (let innerIndex = index; innerIndex < limit; innerIndex++) {
+            const file = fileList.item(innerIndex);
+            if (!file) continue;
+
+            const path = (file as any).webkitRelativePath || file.name;
+            if (!shouldProcessFile(path, file.size)) continue;
+
+            candidateFiles.push({
+              file,
+              path,
+              name: file.name,
+              size: file.size
+            });
+          }
+
+          await yieldToBrowser();
+        }
+
+        candidateFiles.sort((a, b) => {
+          const priorityDiff = prioritizeFile(a.path, a.name) - prioritizeFile(b.path, b.name);
+          if (priorityDiff !== 0) return priorityDiff;
+          return a.path.localeCompare(b.path);
+        });
 
         const selectedCandidates = candidateFiles.slice(0, MAX_GRAPH_FILES);
-        const skippedCount = filesArray.length - selectedCandidates.length;
+        const skippedCount = fileList.length - selectedCandidates.length;
 
         const workerInput: { path: string; name: string; size: number; content: string }[] = [];
 
@@ -981,7 +1007,7 @@ export const useProjectStore = create<ProjectState>()(
 
           workerInput.push(...batchResults);
 
-          await new Promise((resolve) => window.setTimeout(resolve, 0));
+          await yieldToBrowser();
         }
 
         const worker = new Worker(new URL('../workers/analysis.worker.ts', import.meta.url), { type: 'module' });
