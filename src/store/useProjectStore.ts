@@ -355,8 +355,19 @@ const extractStackPathHints = (errorText: string) => {
   );
 };
 
-const extractAIHighlights = (aiReview: string | null, limit = 6) => {
+const GENERIC_AI_PHRASES = [
+  'en este análisis',
+  'las responsabilidades del proyecto se pueden resumir',
+  'la auditoría ia',
+  'la revisión ia',
+  'este documento fue generado',
+  'se identificarán las responsabilidades'
+];
+
+const sanitizeAIHighlights = (aiReview: string | null) => {
   if (!aiReview) return [];
+
+  const seen = new Set<string>();
 
   return aiReview
     .split('\n')
@@ -364,15 +375,48 @@ const extractAIHighlights = (aiReview: string | null, limit = 6) => {
     .filter((line) => line.length > 0)
     .filter((line) => !line.startsWith('```'))
     .filter((line) => !line.startsWith('#'))
-    .filter((line) => !/^[-*]\s*$/.test(line))
+    .filter((line) => !/^[-*=\s]+$/.test(line))
     .filter((line) => !/^>\s*$/.test(line))
-    .map((line) => line.replace(/^[-*]\s+/, '').replace(/^\d+\.\s+/, ''))
+    .map((line) => line.replace(/^[-*]\s+/, '').replace(/^\d+\.\s+/, '').trim())
     .filter((line) => line.length >= 24)
-    .slice(0, limit);
+    .filter((line) => !GENERIC_AI_PHRASES.some((phrase) => line.toLowerCase().includes(phrase)))
+    .filter((line) => {
+      const normalized = line.toLowerCase().replace(/[^\w\s]/g, '').replace(/\s+/g, ' ').trim();
+      if (!normalized || seen.has(normalized)) return false;
+      seen.add(normalized);
+      return true;
+    });
 };
 
-const buildAIEnhancementBlock = (aiReview: string | null, title: string, intro: string) => {
-  const highlights = extractAIHighlights(aiReview);
+const scoreAIHighlightForIntent = (line: string, intent: 'vision' | 'architecture' | 'refactor' | 'handoff') => {
+  const normalized = line.toLowerCase();
+  const keywordsByIntent = {
+    vision: ['contexto', 'valor', 'agentes', 'desarrolladores', 'handoff', 'task', 'error', 'semantic', 'impacto', 'memoria'],
+    architecture: ['arquitect', 'flujo', 'módulo', 'modulo', 'depend', 'capa', 'grafo', 'store', 'frontend', 'backend', 'hotspot'],
+    refactor: ['refactor', 'riesgo', 'deuda', 'cuello', 'mejora', 'valid', 'complej', 'acopla', 'impacto', 'hotspot'],
+    handoff: ['revis', 'archivo', 'antes de', 'cambiar', 'editar', 'valid', 'prior', 'cuidado', 'flujo', 'depend']
+  } as const;
+
+  return keywordsByIntent[intent].reduce((score, keyword) => (
+    normalized.includes(keyword) ? score + 2 : score
+  ), 0);
+};
+
+const extractAIHighlightsForIntent = (aiReview: string | null, intent: 'vision' | 'architecture' | 'refactor' | 'handoff', limit = 4) => {
+  const highlights = sanitizeAIHighlights(aiReview);
+
+  return highlights
+    .map((line) => ({ line, score: scoreAIHighlightForIntent(line, intent) }))
+    .sort((a, b) => {
+      if (b.score !== a.score) return b.score - a.score;
+      return b.line.length - a.line.length;
+    })
+    .filter((item, index, items) => item.score > 0 || index < Math.min(limit, items.length))
+    .slice(0, limit)
+    .map((item) => item.line);
+};
+
+const buildAIEnhancementBlock = (highlights: string[], title: string, intro: string) => {
   if (!highlights.length) return '';
 
   let text = `\n## ${title}\n`;
@@ -384,28 +428,30 @@ const buildAIEnhancementBlock = (aiReview: string | null, title: string, intro: 
 };
 
 const buildAIVisionDocument = (projectName: string, aiReview: string, stack: string[], entryPoints: string[]) => {
+  const highlights = extractAIHighlightsForIntent(aiReview, 'vision', 4);
   let text = `# AI Project Vision: ${projectName}\n\n`;
   text += `## Propósito Inferido\n`;
-  text += `Este documento fue generado desde la auditoría IA activa combinada con el análisis estructural del grafo. Resume para qué existe el proyecto y qué debería entender otro agente antes de intervenir.\n\n`;
+  text += `Resumen corto para entender por qué existe el proyecto y qué valor entrega antes de entrar al detalle técnico.\n\n`;
   text += `## Contexto Base\n`;
   text += `- Proyecto: ${projectName}\n`;
   text += `- Stack detectado: ${getTopItems(stack, 8)}\n`;
   text += `- Entry points principales: ${getTopItems(entryPoints, 6)}\n`;
   text += buildAIEnhancementBlock(
-    aiReview,
-    'Visión Interpretada por IA',
-    'La revisión IA resumió estos puntos como la intención y dirección principal del sistema:'
+    highlights,
+    'Lectura de Valor',
+    'Señales útiles para explicar rápido qué resuelve el producto y por qué no es solo visualización:'
   );
   text += `\n## Cómo Usar Este Documento\n`;
-  text += `- Léelo primero si un agente necesita entender rápidamente el valor del proyecto.\n`;
-  text += `- Complétalo con snapshot, system view y task pack antes de tocar código.\n`;
+  text += `- Léelo primero si alguien necesita ubicarse rápido en el producto.\n`;
+  text += `- Complétalo con snapshot, task pack y graph guide si ya vas a editar código.\n`;
   return text;
 };
 
 const buildAIArchitectureNarrative = (projectName: string, aiReview: string, topRelations: string[], hotspots: { label: string; path: string; importance: number }[]) => {
+  const highlights = extractAIHighlightsForIntent(aiReview, 'architecture', 5);
   let text = `# AI Architecture Narrative: ${projectName}\n\n`;
   text += `## Narrativa del Sistema\n`;
-  text += `Este documento traduce el grafo y la auditoría IA a una explicación más humana de cómo fluye el sistema.\n\n`;
+  text += `Traducción corta del grafo a una lectura más humana de flujos, piezas centrales y tensiones del sistema.\n\n`;
   text += `## Relaciones Estructurales Clave\n`;
   topRelations.slice(0, 12).forEach((relation) => {
     text += `- ${relation}\n`;
@@ -415,39 +461,41 @@ const buildAIArchitectureNarrative = (projectName: string, aiReview: string, top
     text += `- ${item.label} -> ${withProjectRoot(projectName, item.path)} [${item.importance}]\n`;
   });
   text += buildAIEnhancementBlock(
-    aiReview,
+    highlights,
     'Lectura Arquitectónica de IA',
-    'La auditoría IA aporta esta interpretación sobre responsabilidades, flujo y tensiones del sistema:'
+    'Observaciones de arquitectura que sí vale la pena cruzar con el grafo antes de tocar módulos centrales:'
   );
   return text;
 };
 
 const buildAIRefactorPriorities = (projectName: string, aiReview: string, hotspots: { label: string; path: string; importance: number }[]) => {
+  const highlights = extractAIHighlightsForIntent(aiReview, 'refactor', 5);
   let text = `# AI Refactor Priorities: ${projectName}\n\n`;
   text += `## Prioridad Determinista Inicial\n`;
   hotspots.slice(0, 10).forEach((item, index) => {
     text += `${index + 1}. ${item.label} -> ${withProjectRoot(projectName, item.path)} [impacto ${item.importance}]\n`;
   });
   text += buildAIEnhancementBlock(
-    aiReview,
+    highlights,
     'Prioridades Sugeridas por IA',
-    'Estos son los focos de refactor, consolidación o validación que resaltó la auditoría IA:'
+    'Zonas donde la IA ve más riesgo, deuda o valor potencial de simplificación:'
   );
   text += `\n## Uso Recomendado\n`;
   text += `- Cruza estas prioridades con hotspots y graph guide antes de refactorizar.\n`;
-  text += `- Si una prioridad toca estado compartido o auth, revisa también contextos y APIs conectadas.\n`;
+  text += `- Si una prioridad toca estado compartido o integraciones clave, valida también stores, utilidades y puntos de entrada conectados.\n`;
   return text;
 };
 
 const buildAIAgentHandoff = (projectName: string, aiReview: string, taskPack: string) => {
+  const highlights = extractAIHighlightsForIntent(aiReview, 'handoff', 4);
   let text = `# AI Agent Handoff: ${projectName}\n\n`;
   text += `## Instrucción de Uso\n`;
-  text += `Este documento sirve para entregarle a otro agente una mezcla de lectura estratégica y archivos sugeridos.\n`;
+  text += `Documento corto para pasarle a otro agente lo mínimo útil sin convertir esto en una wiki eterna.\n`;
   text += `Úsalo junto con el task pack para reducir onboarding y evitar exploración innecesaria.\n`;
   text += buildAIEnhancementBlock(
-    aiReview,
+    highlights,
     'Notas Estratégicas de IA',
-    'Antes de tocar código, la auditoría IA recomienda prestar atención a lo siguiente:'
+    'Pistas rápidas para decidir por dónde entrar y qué validar antes de editar:'
   );
   text += `\n## Task Pack Base\n`;
   text += `${taskPack}\n`;
@@ -554,6 +602,7 @@ const extractProjectInsights = (projectData: ProjectData, projectName: string): 
 };
 
 const buildExecutiveContext = (insights: ProjectInsights, filesCount: number, linksCount: number, aiReview?: string | null) => {
+  const highlights = extractAIHighlightsForIntent(aiReview || null, 'vision', 4);
   let text = `# Executive View: ${insights.projectName}\n\n`;
   text += `## Qué Hace\n`;
   text += `${insights.projectName} es un proyecto orientado a entregar contexto arquitectónico accionable para desarrolladores y agentes de programación.\n\n`;
@@ -569,7 +618,7 @@ const buildExecutiveContext = (insights: ProjectInsights, filesCount: number, li
   text += `- Revisa los hotspots porque suelen orquestar pantallas, estado o integración.\n`;
   text += `- Sigue las relaciones principales para ubicar rápido dónde tocar cuando te pidan una funcionalidad.\n`;
   text += buildAIEnhancementBlock(
-    aiReview || null,
+    highlights,
     'Capa IA',
     'Hallazgos resumidos a partir de la auditoría IA actual para complementar la lectura ejecutiva:'
   );
@@ -577,6 +626,7 @@ const buildExecutiveContext = (insights: ProjectInsights, filesCount: number, li
 };
 
 const buildSystemView = (insights: ProjectInsights, aiReview?: string | null) => {
+  const highlights = extractAIHighlightsForIntent(aiReview || null, 'architecture', 4);
   let text = `# System View: ${insights.projectName}\n\n`;
   text += `## Capas Detectadas\n`;
   insights.layerEntries.forEach((entry) => {
@@ -593,7 +643,7 @@ const buildSystemView = (insights: ProjectInsights, aiReview?: string | null) =>
     text += `- ${relation}\n`;
   });
   text += buildAIEnhancementBlock(
-    aiReview || null,
+    highlights,
     'AI Layer',
     'Estos puntos condensan hallazgos de la revisión IA para enriquecer la vista sistémica:'
   );
@@ -601,6 +651,7 @@ const buildSystemView = (insights: ProjectInsights, aiReview?: string | null) =>
 };
 
 const buildHotspotReport = (insights: ProjectInsights, aiReview?: string | null) => {
+  const highlights = extractAIHighlightsForIntent(aiReview || null, 'refactor', 4);
   let text = `# Hotspots & Deuda Técnica: ${insights.projectName}\n\n`;
   text += `## Hotspots Prioritarios\n`;
   insights.topHotspots.forEach((item, index) => {
@@ -614,7 +665,7 @@ const buildHotspotReport = (insights: ProjectInsights, aiReview?: string | null)
   text += `- Revisa luego los archivos con más conexiones salientes: suelen ser orquestadores o pantallas con demasiadas responsabilidades.\n`;
   text += `- Antes de refactorizar, sigue las relaciones del grafo para evitar romper cadenas de dependencias ocultas.\n`;
   text += buildAIEnhancementBlock(
-    aiReview || null,
+    highlights,
     'Señales IA Sobre Riesgo',
     'La auditoría IA detectó estos focos de atención que conviene validar junto al ranking determinista:'
   );
@@ -831,6 +882,7 @@ const buildTaskPackData = (projectData: ProjectData, insights: ProjectInsights, 
 
 const buildTaskPack = (projectData: ProjectData, insights: ProjectInsights, task: string, aiReview?: string | null) => {
   const data = buildTaskPackData(projectData, insights, task);
+  const highlights = extractAIHighlightsForIntent(aiReview || null, 'handoff', 4);
   let text = `# Agent Task Pack: ${data.projectName}\n\n`;
   text += `## Tarea Solicitada\n`;
   text += `${data.task}\n\n`;
@@ -865,7 +917,7 @@ const buildTaskPack = (projectData: ProjectData, insights: ProjectInsights, task
     text += `${index + 1}. ${item}\n`;
   });
   text += buildAIEnhancementBlock(
-    aiReview || null,
+    highlights,
     'AI Handoff Notes',
     'Si ya existe auditoría IA, usa estas notas como segunda capa antes de editar archivos:'
   );
@@ -1669,6 +1721,33 @@ export const useProjectStore = create<ProjectState>()(
           .slice(0, 5)
           .map(([ext, count]) => `${ext} (${count})`);
 
+        const detectedCapabilities = new Set<string>();
+        projectData.files.forEach((file) => {
+          const code = file.content.toLowerCase();
+          if (code.includes('generateerrorcontextpack') || code.includes('error-to-context')) detectedCapabilities.add('Error-to-Context Pack');
+          if (code.includes('generatetaskpack') || code.includes('task pack')) detectedCapabilities.add('Task Pack Builder');
+          if (code.includes('generatesemanticsearchresults') || code.includes('semantic search')) detectedCapabilities.add('Semantic Search');
+          if (code.includes('generateimpactanalysisdata') || code.includes('predictive impact')) detectedCapabilities.add('Predictive Impact Analysis');
+          if (code.includes('buildsmartdiffdata') || code.includes('smart diff')) detectedCapabilities.add('Smart Diff Context');
+          if (code.includes('projectmemory') || code.includes('setprojectglobalmemory') || code.includes('setprojectfilememory')) detectedCapabilities.add('Project Memory');
+          if (code.includes('generateaivisiondocument') || code.includes('generateaiarchitecturenarrative') || code.includes('generateairefactorpriorities')) detectedCapabilities.add('AI Handoff Documents');
+          if (code.includes('generateaicontext')) detectedCapabilities.add('Architectural Snapshot Export');
+        });
+
+        const capabilityList = Array.from(detectedCapabilities);
+
+        const productCoreFiles = projectData.files.filter((file) => {
+          const lowerPath = file.path.toLowerCase();
+          return (
+            lowerPath.endsWith('src/app.tsx') ||
+            lowerPath.endsWith('src/store/useprojectstore.ts') ||
+            lowerPath.endsWith('src/utils/analysis.ts') ||
+            lowerPath.endsWith('main.py') ||
+            lowerPath.endsWith('server/index.js')
+          );
+        });
+        const productCoreFileList = productCoreFiles.map((file) => rootPath(file.path));
+
         const topNodes = [...projectData.nodes]
           .sort((a, b) => (b.data.importance || 0) - (a.data.importance || 0))
           .slice(0, 8);
@@ -1723,18 +1802,20 @@ export const useProjectStore = create<ProjectState>()(
           });
 
         const inferredPurpose = [
-          stack.has('React') ? 'interfaz visual para explorar proyectos' : null,
-          stack.has('Express.js') ? 'servicios Node/Express' : null,
-          backendFiles.some(path => path.endsWith('main.py')) ? 'backend FastAPI para análisis y orquestación de IA' : null,
-          stack.has('Tailwind CSS') ? 'UI estilizada con Tailwind' : null,
-          stack.has('WebSockets') ? 'capacidades en tiempo real' : null
+          capabilityList.length > 0 ? 'extraer contexto arquitectónico accionable para desarrolladores y agentes' : null,
+          capabilityList.includes('Task Pack Builder') ? 'armar handoffs cortos y task packs por intención' : null,
+          capabilityList.includes('Error-to-Context Pack') ? 'convertir errores en contexto corto de depuración' : null,
+          capabilityList.includes('Semantic Search') ? 'ubicar módulos por propósito y no solo por nombre' : null,
+          capabilityList.includes('Predictive Impact Analysis') ? 'anticipar impacto antes de modificar archivos' : null,
+          backendFiles.some(path => path.endsWith('main.py')) ? 'backend FastAPI para análisis y orquestación de IA' : null
         ].filter(Boolean).join(', ');
 
         const architectureSummary = [
           frontendFiles.length > 0 ? `Frontend detectado con ${frontendFiles.length} archivos principales de interfaz.` : null,
           backendFiles.length > 0 ? `Backend detectado con ${backendFiles.length} archivos de lógica/servicio.` : null,
           projectData.links.length > 0 ? `Se mapearon ${projectData.links.length} relaciones entre módulos.` : null,
-          topHotspots.length > 0 ? `Los hotspots más conectados son ${getTopItems(topHotspots, 4)}.` : null
+          topHotspots.length > 0 ? `Los hotspots más conectados son ${getTopItems(topHotspots, 4)}.` : null,
+          capabilityList.length > 0 ? `Las capacidades detectadas del producto son ${getTopItems(capabilityList, 8)}.` : null
         ].filter(Boolean).join(' ');
 
         let context = "### ARCHITECTURAL INTELLIGENCE SNAPSHOT\n";
@@ -1748,6 +1829,18 @@ export const useProjectStore = create<ProjectState>()(
         context += `Primary Entry Points: ${getTopItems(formatProjectPaths(normalizedName, entryPoints), 8)}\n`;
         context += `Main Directories: ${getTopItems(Array.from(directories), 10)}\n`;
         context += `Dominant File Types: ${getTopItems(dominantExt, 5)}\n\n`;
+
+        context += "### PRODUCT CAPABILITIES\n";
+        context += `Core Product Capabilities: ${getTopItems(capabilityList, 10)}\n`;
+        context += `Core Product Files: ${getTopItems(productCoreFileList, 8)}\n`;
+        context += `Analysis Mode Split: Deterministic local analysis first, optional AI enrichment second.\n`;
+        context += `Important Framing: No describas este proyecto solo como visualizador de grafo si las capacidades detectadas muestran handoff, task packs, error packs, impacto, búsqueda semántica o memoria de proyecto.\n\n`;
+
+        context += "### EXPLICIT CONSTRAINTS\n";
+        context += `Deployment Model: local-first tool. No asumir SaaS, multiusuario ni servicio remoto salvo evidencia explícita.\n`;
+        context += `Authentication: no se detectó autenticación, cuentas de usuario ni login como capacidad central del producto.\n`;
+        context += `Persistence Model: la persistencia detectada es local. No afirmar almacenamiento en nube, base de datos de usuarios ni sincronización remota sin evidencia explícita.\n`;
+        context += `Inference Rule: si una capacidad no aparece en archivos, rutas, dependencias o funciones detectadas, no la inventes.\n\n`;
 
         context += "### ESTRUCTURA DE DIRECTORIOS\n";
         const tree = buildFileTree(filesWithRoot);
@@ -1767,8 +1860,9 @@ export const useProjectStore = create<ProjectState>()(
         });
 
         context += "\n### EXECUTIVE SUMMARY FOR AGENTS\n";
-        context += `- Project Goal: ${normalizedName} centraliza información del código para resumir, describir y explicar la arquitectura del proyecto analizado.\n`;
-        context += `- Key Flows: Carga de archivos -> análisis local -> enriquecimiento con backend -> exportación de snapshot/graph -> revisión con IA.\n`;
+        context += `- Project Goal: ${normalizedName} centraliza información del código para convertir un proyecto local en contexto accionable para humanos y agentes.\n`;
+        context += `- Key Flows: Carga de archivos -> análisis local -> grafo y hotspots -> task packs / error packs / semantic search / impact analysis -> exportación de artefactos -> revisión con IA opcional.\n`;
+        context += `- Product Differentiators: ${getTopItems(capabilityList, 8)}\n`;
         context += `- Critical Hotspots: ${getTopItems(topHotspots, 6)}\n`;
         context += `- Sample Dependency Paths: ${getTopItems(topRelations, 8)}\n`;
 

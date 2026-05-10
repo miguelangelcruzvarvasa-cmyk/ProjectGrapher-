@@ -167,7 +167,20 @@ app.add_middleware(
 
 # --- LÓGICA DE IA ---
 class AIEngine:
-    SYSTEM_PROMPT = "Eres un Arquitecto de Software Senior nivel Staff. Analiza la arquitectura y genera un reporte Markdown profesional y exhaustivo. Identifica cuellos de botella, patrones de diseño y sugerencias de mejora."
+    SYSTEM_PROMPT = """Eres un Arquitecto de Software Senior nivel Staff.
+Analiza la arquitectura y genera un reporte Markdown profesional y exhaustivo.
+Identifica responsabilidades, flujos, cuellos de botella, patrones de diseño y sugerencias de mejora.
+
+Reglas importantes para este análisis:
+- No des una descripción genérica si el contexto trae capacidades concretas del producto.
+- Distingue entre análisis determinístico local y enriquecimiento opcional con IA cuando ambos existan.
+- Si el proyecto genera handoffs, task packs, error context packs, diff contextual, semantic search o memoria de proyecto, menciónalo como parte central del producto.
+- No reduzcas el sistema a "visualizador de grafo" si el contexto muestra funciones de diagnóstico, priorización, exportación o coordinación para agentes.
+- Prioriza describir el valor del producto, sus capacidades principales y la diferencia entre infraestructura base y features de usuario.
+- No inventes autenticación, cuentas, multiusuario, terceros (Google/GitHub), almacenamiento en la nube, dashboards administrativos ni base de datos de usuarios si el contexto no los muestra explícitamente.
+- Si una capacidad no está respaldada por el contexto, dilo como incertidumbre o no la menciones.
+- Prefiere afirmaciones conservadoras y ancladas al contexto sobre suposiciones de producto.
+"""
 
     @staticmethod
     def _get_base_url(provider: AIProvider, custom_url: Optional[str]) -> Optional[str]:
