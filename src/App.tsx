@@ -637,7 +637,7 @@ export default function App() {
                   </div>
                 </div>
               ) : (
-                <div className="space-y-6 p-4 sm:p-6 lg:p-7 xl:p-8">
+                <div className="custom-scrollbar flex-1 overflow-y-auto space-y-6 p-4 sm:p-6 lg:p-7 xl:p-8">
                   <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                     <h3 className="text-2xl font-bold text-white">{projectName || 'Dashboard'}</h3>
                     <div className="px-3 py-1 bg-brand-secondary/20 text-brand-secondary text-[10px] font-bold rounded-full uppercase">

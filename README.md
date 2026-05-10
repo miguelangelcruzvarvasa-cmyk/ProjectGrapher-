@@ -23,6 +23,10 @@ Capacidades principales:
 - Vistas sistémicas y resúmenes ejecutivos
 - Task packs para prompts como `ajusta el perfil del usuario y dime qué archivos modificar`
 - Error-to-Context Packs a partir de errores pegados desde tu proyecto local cargado
+- Semantic Search para buscar por intención y no solo por nombre de archivo
+- Predictive Impact Analysis para anticipar qué módulos podrían verse afectados al tocar un archivo
+- Smart Diff Context entre corridas locales del mismo proyecto
+- Project Memory para guardar notas persistentes por proyecto y por archivo
 - Auditorías IA opcionales con proveedores como Groq, OpenAI, Gemini, DeepSeek, OpenRouter, Mistral u Ollama
 - Documentos de handoff generados por IA y guardados en `contexto/<nombre-del-proyecto>/`
 
@@ -129,11 +133,19 @@ ProjectGrapher puede generar archivos como:
 
 Los archivos enriquecidos con IA se guardan automáticamente en la carpeta local `contexto/<nombre-del-proyecto>/` una vez que se genera una auditoría IA.
 
+## Capacidades Nuevas
+
+- `Semantic Search`: encuentra archivos por intención como `dónde vive autenticación` o `qué toca pagos`.
+- `Predictive Impact Analysis`: desde un nodo seleccionado, estima dependencias, consumidores directos e impacto secundario.
+- `Smart Diff Context`: compara la corrida actual contra la corrida local anterior del mismo proyecto para detectar archivos y relaciones nuevas o removidas.
+- `Project Memory`: guarda notas locales persistentes del proyecto y notas por archivo para futuras sesiones.
+- `Centro de Exportación` reorganizado por intención: overview, task pack, error pack, documentos IA y exportes base.
+
 ## Modo Determinístico vs Modo IA
 
 ProjectGrapher separa dos capas de trabajo:
 
-- `Determinístico`: análisis del árbol, dependencias, hotspots, graph guide, metadata, brief, system view y task packs. Esta parte funciona sin proveedores de IA.
+- `Determinístico`: análisis del árbol, dependencias, hotspots, graph guide, project summary, brief, system view, semantic search, impact analysis, smart diff, project memory, task packs y error packs. Esta parte funciona sin proveedores de IA.
 - `IA opcional`: auditoría arquitectónica, visión interpretada por modelo, narrativa enriquecida, prioridades sugeridas por IA y handoff asistido.
 
 El `Error-to-Context Pack` pertenece primero al modo determinístico: parte de un stack trace o mensaje de error pegado desde un proyecto local ya cargado, ubica el origen probable en el grafo y arma un mini contexto antes de escalar a IA.
