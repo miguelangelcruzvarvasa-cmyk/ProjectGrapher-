@@ -159,6 +159,8 @@ const IMPORT_PATTERNS: Record<string, RegExp[]> = {
   'Dexie': [/from\s+['"]dexie['"]/i, /import\s+.*['"]dexie['"]/i, /new\s+Dexie\(/i],
   'Firebase': [/from\s+['"]firebase/i, /import\s+.*['"]firebase/i, /firebase.*\.initialize/i],
   'WebSockets': [/socket\.io/i, /WebSocket\(/i, /from\s+['"]ws['"]/i],
+  'Flutter': [/package:flutter/i, /import\s+['"]package:flutter/i],
+  'Dart': [/import\s+['"]package:[a-zA-Z0-9_]+/i, /import\s+['"]dart:/i],
 };
 
 export const detectTechStackSignals = (file: ProjectFile) => {
@@ -184,6 +186,12 @@ export const detectTechStackSignals = (file: ProjectFile) => {
   if (ext === '.cs' || code.includes('<project sdk=')) stack.add('C#');
   if (ext === '.cs' || code.includes('microsoft.aspnetcore')) stack.add('.NET / ASP.NET');
   if (code.includes('vite-plugin-pwa') || code.includes('manifest')) stack.add('PWA');
+  if (ext === '.dart') {
+    stack.add('Dart');
+    if (code.includes('flutter') || path.includes('lib/')) {
+      stack.add('Flutter');
+    }
+  }
 
   if (code.includes('prisma')) databases.add('Prisma');
   if (code.includes('mongoose')) databases.add('MongoDB/Mongoose');
@@ -200,7 +208,7 @@ export const detectTechStackSignals = (file: ProjectFile) => {
   if (ext === '.cs' || code.includes('microsoft.aspnetcore')) runtime.add('Backend .NET');
   if (code.includes('worker') || path.includes('worker')) runtime.add('Background Worker');
 
-  if (['.tsx', '.jsx', '.vue', '.svelte'].includes(ext) || detectByImport(code, IMPORT_PATTERNS['Angular'])) ui.add('SPA Frontend');
+  if (['.tsx', '.jsx', '.vue', '.svelte', '.dart'].includes(ext) || detectByImport(code, IMPORT_PATTERNS['Angular']) || stack.has('Flutter')) ui.add('SPA Frontend');
   if (ext === '.html' || ext === '.css' || ext === '.scss' || ext === '.sass') ui.add('Web UI');
 
   return {

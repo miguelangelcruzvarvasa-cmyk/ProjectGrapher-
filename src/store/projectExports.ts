@@ -56,7 +56,7 @@ const compressFileSummary = (fileName: string, semantics: { role: string; comple
   return `${semantics.role}; complejidad ${semantics.complexity}; ${semantics.lines} lineas; exports ${getTopItems(semantics.exports, 5)}`;
 };
 
-const ENTRY_FILE_NAMES = ['main.tsx', 'main.jsx', 'app.tsx', 'app.jsx', 'main.py', 'server.js', 'index.js', 'index.ts'];
+const ENTRY_FILE_NAMES = ['main.tsx', 'main.jsx', 'app.tsx', 'app.jsx', 'main.py', 'server.js', 'index.js', 'index.ts', 'main.dart'];
 
 const LANGUAGE_MAP: Record<string, string> = {
   '.ts': 'TypeScript',
@@ -74,7 +74,8 @@ const LANGUAGE_MAP: Record<string, string> = {
   '.css': 'CSS',
   '.scss': 'SCSS',
   '.vue': 'Vue',
-  '.svelte': 'Svelte'
+  '.svelte': 'Svelte',
+  '.dart': 'Dart'
 };
 
 const takeLimited = <T>(items: T[], limit: number) => items.slice(0, limit);
@@ -418,7 +419,7 @@ export const generateAIContextExport = (projectData: ProjectData, projectName: s
       entryPoints.push(file.path);
     }
 
-    if (['.tsx', '.ts', '.jsx', '.js', '.html', '.css', '.scss'].includes(file.ext)) {
+    if (['.tsx', '.ts', '.jsx', '.js', '.html', '.css', '.scss', '.dart'].includes(file.ext)) {
       frontendFiles.push(file.path);
     }
 
