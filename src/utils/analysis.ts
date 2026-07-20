@@ -1,37 +1,20 @@
 
+import { PROJECT_ANALYSIS_RULES } from '../config/projectContext';
 import { ProjectFile, TreeNode, GraphLink } from '../types';
 
-const ALLOWED_EXTENSIONS = [
-  '.js', '.jsx', '.ts', '.tsx', '.py', '.rb', '.go', '.rs', '.java', 
-  '.c', '.cpp', '.h', '.cs', '.php', '.swift', '.html', '.css', 
-  '.scss', '.sass', '.less', '.vue', '.svelte'
-];
-const IGNORED_DIRS = [
-  // Dependencies & Build
-  'node_modules', '.git', 'dist', 'build', 'venv', '__pycache__', 
-  '.next', '.cache', '.vscode', '.idea', 'vendor', 'coverage', 
-  'tmp', 'temp', '.sass-cache', '.parcel-cache', 'public/build',
-  'out', 'target', 'node_modules_old', 'bower_components',
-  'jspm_packages', '.npm', '.yarn', 'obj', 'bin', 'debug', 'release',
-  
-  // Mobile & Native
-  'ios', 'android', '.expo', 'Pods', '.gradle', 'fastlane',
-  
-  // Assets & Media (Usually many small files)
-  'assets', 'static', 'public', 'images', 'img', 'media', 'fonts', 'locales',
-  'i18n', 'screenshots', 'videos', 'uploads', 'backups',
-  
-  // Documentation & Testing (Optional for architecture)
-  'docs', 'documentation', '__tests__', 'tests', 'test', 'spec', 'e2e'
-];
+const IGNORED_FILES_SET = new Set<string>(PROJECT_ANALYSIS_RULES.ignoredFiles);
+const IGNORED_DIRS_SET = new Set<string>(PROJECT_ANALYSIS_RULES.ignoredDirectories);
+const ALLOWED_EXTS_SET = new Set<string>(PROJECT_ANALYSIS_RULES.allowedExtensions);
 
-const IGNORED_FILES = [
-  'package-lock.json', 'yarn.lock', 'pnpm-lock.yaml', 
-  'composer.lock', 'Gemfile.lock', '.DS_Store', 'thumbs.db',
-  '.env', '.env.local', '.env.development.local', 'pip-log.txt',
-  'npm-debug.log', 'yarn-debug.log', 'yarn-error.log',
-  'README.md', 'LICENSE', 'CONTRIBUTING.md', 'CHANGELOG.md'
-];
+export type FileSemanticSummary = {
+  lines: number;
+  nonEmptyLines: number;
+  exports: string[];
+  role: string;
+  confidence: 'high' | 'medium';
+  complexity: 'low' | 'medium' | 'high';
+  evidence: 'code' | 'path+code' | 'path';
+};
 
 export const getExtension = (filename: string) => {
   const parts = filename.split('.');
@@ -48,7 +31,7 @@ export const normalizeProjectPath = (value: string) =>
     .toLowerCase();
 
 export const stripKnownExtension = (value: string) =>
-  value.replace(/\.(js|jsx|ts|tsx|mjs|cjs|py|go|rs|java|cs|php|rb|vue|svelte|html|css|scss|sass|less)$/i, '');
+  value.replace(/\.(js|jsx|ts|tsx|mjs|cjs|py|go|rs|java|cs|php|rb|vue|svelte|html|css|scss|sass|less|dart)$/i, '');
 
 const createLookupAliases = (file: ProjectFile) => {
   const normalizedPath = normalizeProjectPath(file.path);
@@ -158,6 +141,15 @@ export const findDependencies = (content: string, filename: string): string[] =>
     while ((match = fromPy.exec(content)) !== null) {
       deps.push(match[1].split('.')[0]);
     }
+  } else if (ext === '.dart') {
+    const importDart = /^(?:import|export)\s+['"]([^'"]+)['"]/gm;
+    let match;
+    while ((match = importDart.exec(content)) !== null) {
+      const depPath = match[1];
+      if (!depPath.startsWith('package:') && !depPath.startsWith('dart:')) {
+        deps.push(depPath);
+      }
+    }
   }
 
   return [...new Set(deps)];
@@ -165,15 +157,15 @@ export const findDependencies = (content: string, filename: string): string[] =>
 
 export const shouldProcessFile = (path: string, size: number): boolean => {
   const filename = path.split('/').pop() || '';
-  if (IGNORED_FILES.includes(filename)) return false;
+  if (IGNORED_FILES_SET.has(filename)) return false;
 
   const parts = path.split('/');
   // Filter for common build, meta and dependency folders
-  if (parts.some(part => IGNORED_DIRS.includes(part))) return false;
+  if (parts.some(part => IGNORED_DIRS_SET.has(part))) return false;
   
   const ext = getExtension(path);
-  if (!ALLOWED_EXTENSIONS.includes(ext)) return false;
-  if (size > 1024 * 1024) return false; // 1MB limit per file
+  if (!ALLOWED_EXTS_SET.has(ext)) return false;
+  if (size > PROJECT_ANALYSIS_RULES.maxFileSizeBytes) return false;
   return true;
 };
 
@@ -235,6 +227,178 @@ export const calculateAAMetrics = (files: ProjectFile[], links: GraphLink[]) => 
     totalLines,
     complexityAvg: complexityAvg.toFixed(2),
     architectureHealth
+  };
+};
+
+const truncateSignature = (value: string, maxLength = 88) => (
+  value.length > maxLength ? `${value.slice(0, maxLength - 3)}...` : value
+);
+
+const uniqueOrdered = (items: string[]) => Array.from(new Set(items.filter(Boolean)));
+
+const extractJavaScriptExports = (content: string) => {
+  const signatures: string[] = [];
+  const patterns = [
+    /export\s+async\s+function\s+([A-Za-z0-9_$]+)\s*\(([^)]*)\)/g,
+    /export\s+function\s+([A-Za-z0-9_$]+)\s*\(([^)]*)\)/g,
+    /export\s+const\s+([A-Za-z0-9_$]+)\s*=\s*(?:async\s*)?\(([^)]*)\)\s*=>/g,
+    /export\s+const\s+([A-Za-z0-9_$]+)\s*=\s*(?:async\s*)?function\s*\(([^)]*)\)/g,
+    /export\s+class\s+([A-Za-z0-9_$]+)/g,
+    /export\s+interface\s+([A-Za-z0-9_$]+)/g,
+    /export\s+type\s+([A-Za-z0-9_$]+)/g
+  ];
+
+  patterns.forEach((pattern, index) => {
+    let match;
+    while ((match = pattern.exec(content)) !== null) {
+      if (index <= 3) {
+        signatures.push(`${match[1]}(${(match[2] || '').replace(/\s+/g, ' ').trim()})`);
+      } else {
+        signatures.push(match[1]);
+      }
+    }
+  });
+
+  const defaultFunction = content.match(/export\s+default\s+function\s+([A-Za-z0-9_$]+)?\s*\(([^)]*)\)/);
+  if (defaultFunction) {
+    signatures.push(`default ${defaultFunction[1] || 'function'}(${(defaultFunction[2] || '').replace(/\s+/g, ' ').trim()})`);
+  }
+
+  const namedExportBlock = content.match(/export\s*\{\s*([^}]+)\s*\}/);
+  if (namedExportBlock) {
+    namedExportBlock[1]
+      .split(',')
+      .map((item) => item.trim().replace(/\s+as\s+.*/i, ''))
+      .filter(Boolean)
+      .forEach((item) => signatures.push(item));
+  }
+
+  return uniqueOrdered(signatures).map((item) => truncateSignature(item)).slice(0, 8);
+};
+
+const extractPythonExports = (content: string) => {
+  const signatures: string[] = [];
+  const classRegex = /^class\s+([A-Za-z0-9_]+)/gm;
+  const fnRegex = /^def\s+([A-Za-z0-9_]+)\s*\(([^)]*)\)/gm;
+  let match;
+
+  while ((match = classRegex.exec(content)) !== null) {
+    if (!match[1].startsWith('_')) signatures.push(match[1]);
+  }
+  while ((match = fnRegex.exec(content)) !== null) {
+    if (!match[1].startsWith('_')) signatures.push(`${match[1]}(${(match[2] || '').replace(/\s+/g, ' ').trim()})`);
+  }
+
+  return uniqueOrdered(signatures).map((item) => truncateSignature(item)).slice(0, 8);
+};
+
+const extractDartExports = (content: string) => {
+  const signatures: string[] = [];
+  const classRegex = /^(?:abstract\s+)?class\s+([A-Za-z0-9_$]+)/gm;
+  const mixinRegex = /^mixin\s+([A-Za-z0-9_$]+)/gm;
+  const extensionRegex = /^extension\s+([A-Za-z0-9_$]+)/gm;
+  const enumRegex = /^enum\s+([A-Za-z0-9_$]+)/gm;
+  const fnRegex = /^(?:[A-Za-z0-9_$<>]+(?:\?\s*)?\s+)?([A-Za-z0-9_$]+)\s*\(([^)]*)\)\s*(?:async\s*)?\{/gm;
+
+  let match;
+  while ((match = classRegex.exec(content)) !== null) {
+    if (!match[1].startsWith('_')) signatures.push(match[1]);
+  }
+  while ((match = mixinRegex.exec(content)) !== null) {
+    if (!match[1].startsWith('_')) signatures.push(match[1]);
+  }
+  while ((match = enumRegex.exec(content)) !== null) {
+    if (!match[1].startsWith('_')) signatures.push(match[1]);
+  }
+  while ((match = fnRegex.exec(content)) !== null) {
+    const fnName = match[1];
+    if (!['if', 'for', 'while', 'switch', 'catch', 'assert', 'class', 'mixin', 'enum', 'extension'].includes(fnName) && !fnName.startsWith('_')) {
+      signatures.push(`${fnName}(${(match[2] || '').replace(/\s+/g, ' ').trim()})`);
+    }
+  }
+
+  return uniqueOrdered(signatures).map((item) => truncateSignature(item)).slice(0, 8);
+};
+
+export const summarizeFileSemantics = (file: ProjectFile): FileSemanticSummary => {
+  const ext = file.ext.toLowerCase();
+  const normalizedPath = file.path.toLowerCase();
+  const normalizedName = file.name.toLowerCase();
+  const content = file.content;
+  const lines = content ? content.split('\n').length : 0;
+  const nonEmptyLines = content
+    ? content.split('\n').map((line) => line.trim()).filter(Boolean).length
+    : 0;
+  const importMatches = content.match(/\b(import|from|require\(|using\s+|from\s+[A-Za-z0-9_.]+\s+import)\b/g) || [];
+  const branchMatches = content.match(/\b(if|else if|switch|case|try|catch|for|while)\b/g) || [];
+  const definitionMatches = content.match(/\b(function|class|interface|type|def)\b/g) || [];
+
+  let role = 'módulo de soporte del proyecto';
+  let confidence: FileSemanticSummary['confidence'] = 'medium';
+  let evidence: FileSemanticSummary['evidence'] = 'path';
+
+  if (/\/hooks\//.test(normalizedPath) || /^use[A-Z]/.test(file.name)) {
+    role = 'hook personalizado que encapsula lógica reutilizable';
+    confidence = 'high';
+    evidence = 'path+code';
+  } else if (/\/stores?\//.test(normalizedPath) || /(zustand|redux|createcontext|usecontext)/i.test(content)) {
+    role = 'estado compartido o contexto global';
+    confidence = 'high';
+    evidence = 'path+code';
+  } else if (/\/api\/|\/services?\//.test(normalizedPath) || /(axios|fetch|endpoint|router|express|fastapi)/i.test(content)) {
+    role = 'integración, servicio o capa de acceso';
+    confidence = 'high';
+    evidence = 'path+code';
+  } else if (/\/workers?\//.test(normalizedPath) || /\bself\.onmessage\b|\bpostMessage\b/.test(content)) {
+    role = 'worker o procesamiento en segundo plano';
+    confidence = 'high';
+    evidence = 'path+code';
+  } else if (/\/components\/|\/pages\/|\/views\/|\/screens\//.test(normalizedPath) || /return\s*\(|jsx|tsx|react/i.test(content)) {
+    role = 'componente, pantalla u orquestador de interfaz';
+    confidence = /\/components\/|\/pages\/|\/views\/|\/screens\//.test(normalizedPath) ? 'high' : 'medium';
+    evidence = /\/components\/|\/pages\/|\/views\/|\/screens\//.test(normalizedPath) ? 'path+code' : 'code';
+  } else if (/\.(css|scss|sass|less)$/.test(normalizedName)) {
+    role = 'estilos o tokens visuales';
+    confidence = 'high';
+    evidence = 'path';
+  } else if (/config|settings|env/.test(normalizedName)) {
+    role = 'configuración compartida del proyecto';
+    confidence = 'medium';
+    evidence = 'path';
+  } else if (/util|helper|format|parse/.test(normalizedName)) {
+    role = 'utilidad o helper reusable';
+    confidence = 'medium';
+    evidence = 'path';
+  } else if (/(app|main|index)\.(ts|tsx|js|jsx|py)$/i.test(file.name)) {
+    role = 'punto de entrada u orquestador principal';
+    confidence = 'high';
+    evidence = 'path';
+  }
+
+  const exports = ['.js', '.jsx', '.ts', '.tsx', '.mjs', '.cjs'].includes(ext)
+    ? extractJavaScriptExports(content)
+    : ext === '.py'
+      ? extractPythonExports(content)
+      : ext === '.dart'
+        ? extractDartExports(content)
+        : [];
+
+  let complexity: FileSemanticSummary['complexity'] = 'low';
+  const complexityScore = nonEmptyLines + (importMatches.length * 4) + (branchMatches.length * 6) + (definitionMatches.length * 5);
+  if (complexityScore >= 320 || nonEmptyLines >= 220) {
+    complexity = 'high';
+  } else if (complexityScore >= 140 || nonEmptyLines >= 90) {
+    complexity = 'medium';
+  }
+
+  return {
+    lines,
+    nonEmptyLines,
+    exports,
+    role,
+    confidence,
+    complexity,
+    evidence
   };
 };
 

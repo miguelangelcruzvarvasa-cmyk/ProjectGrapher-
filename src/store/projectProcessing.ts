@@ -2,8 +2,13 @@ import { GraphLink, GraphNode, ProjectData } from '../types';
 import { createProjectFileResolver, normalizeProjectPath, shouldProcessFile } from '../utils/analysis';
 
 const MAX_GRAPH_FILES = 1500;
-const FILE_READ_BATCH_SIZE = 40;
-const FILE_SCAN_BATCH_SIZE = 500;
+const SCAN_BATCH_SIZE = 2000;
+
+// Escala visual de nodos según su "importancia" (cantidad de links entrantes/salientes)
+const NODE_MIN_SIZE = 12;
+const NODE_MAX_SIZE = 32;
+const NODE_BASE_SIZE = 10;
+const NODE_IMPORTANCE_WEIGHT = 4;
 
 const prioritizeFile = (path: string, name: string) => {
   const normalizedPath = path.toLowerCase();
@@ -27,14 +32,6 @@ const prioritizeFile = (path: string, name: string) => {
   return 3;
 };
 
-const readFileAsText = (file: File) =>
-  new Promise<string>((resolve) => {
-    const reader = new FileReader();
-    reader.onload = (e) => resolve((e.target?.result as string) || '');
-    reader.onerror = () => resolve('');
-    reader.readAsText(file);
-  });
-
 const yieldToBrowser = () =>
   new Promise<void>((resolve) => {
     window.setTimeout(resolve, 0);
@@ -49,11 +46,24 @@ const getProjectRelativePath = (rawPath: string) => {
   return parts.slice(1).join('/');
 };
 
+// Extrae el id de un endpoint de link, que puede venir como string (id crudo)
+// o como objeto GraphNode ya resuelto por la librería de fuerza dirigida.
+const getLinkNodeId = (endpoint: GraphLink['source'] | GraphLink['target']): string =>
+  typeof endpoint === 'object' ? (endpoint as any).id : (endpoint as unknown as string);
+
 type WorkerInputFile = {
   path: string;
   name: string;
   size: number;
-  content: string;
+  file: File;
+};
+
+type ProgressPayload = {
+  stage: 'scanning' | 'reading';
+  message: string;
+  current: number;
+  total: number;
+  ratio: number;
 };
 
 type DeepAnalysisResult = {
@@ -61,8 +71,12 @@ type DeepAnalysisResult = {
   dependencies: string[];
 };
 
-export const prepareProjectFilesForWorker = async (fileList: FileList) => {
-  const firstFile = fileList.item(0);
+export const prepareProjectFilesForWorker = async (
+  fileList: FileList,
+  onProgress?: (progress: ProgressPayload) => void
+) => {
+  const filesArray = Array.from(fileList);
+  const firstFile = filesArray[0];
   if (!firstFile) {
     return {
       projectName: '',
@@ -71,14 +85,16 @@ export const prepareProjectFilesForWorker = async (fileList: FileList) => {
     };
   }
 
-  const projectName = (firstFile as any).webkitRelativePath.split('/')[0] || 'Project';
+  const relativePath = (firstFile as any).webkitRelativePath as string | undefined;
+  const projectName = relativePath?.split('/')[0] || 'Project';
+
   const candidateFiles: { file: File; path: string; name: string; size: number }[] = [];
 
-  for (let index = 0; index < fileList.length; index += FILE_SCAN_BATCH_SIZE) {
-    const limit = Math.min(index + FILE_SCAN_BATCH_SIZE, fileList.length);
+  for (let index = 0; index < filesArray.length; index += SCAN_BATCH_SIZE) {
+    const limit = Math.min(index + SCAN_BATCH_SIZE, filesArray.length);
 
     for (let innerIndex = index; innerIndex < limit; innerIndex++) {
-      const file = fileList.item(innerIndex);
+      const file = filesArray[innerIndex];
       if (!file) continue;
 
       const rawPath = (file as any).webkitRelativePath || file.name;
@@ -93,6 +109,13 @@ export const prepareProjectFilesForWorker = async (fileList: FileList) => {
       });
     }
 
+    onProgress?.({
+      stage: 'scanning',
+      message: 'Revisando estructura del proyecto y filtrando archivos relevantes...',
+      current: limit,
+      total: filesArray.length,
+      ratio: filesArray.length ? limit / filesArray.length : 0
+    });
     await yieldToBrowser();
   }
 
@@ -103,23 +126,26 @@ export const prepareProjectFilesForWorker = async (fileList: FileList) => {
   });
 
   const selectedCandidates = candidateFiles.slice(0, MAX_GRAPH_FILES);
-  const skippedCount = fileList.length - selectedCandidates.length;
-  const workerInput: WorkerInputFile[] = [];
 
-  for (let index = 0; index < selectedCandidates.length; index += FILE_READ_BATCH_SIZE) {
-    const batch = selectedCandidates.slice(index, index + FILE_READ_BATCH_SIZE);
-    const batchResults = await Promise.all(
-      batch.map(async ({ file, path, name, size }) => ({
-        path,
-        name,
-        size,
-        content: await readFileAsText(file)
-      }))
-    );
+  // Importante: skippedCount cuenta solo los candidatos válidos que se
+  // quedaron fuera por el límite MAX_GRAPH_FILES, no los archivos ya
+  // descartados por shouldProcessFile (node_modules, binarios, etc).
+  const skippedCount = candidateFiles.length - selectedCandidates.length;
 
-    workerInput.push(...batchResults);
-    await yieldToBrowser();
-  }
+  const workerInput: WorkerInputFile[] = selectedCandidates.map(({ file, path, name, size }) => ({
+    path,
+    name,
+    size,
+    file
+  }));
+
+  onProgress?.({
+    stage: 'reading',
+    message: 'Preparando envío de archivos en segundo plano...',
+    current: workerInput.length,
+    total: workerInput.length,
+    ratio: 1.0
+  });
 
   return {
     projectName,
@@ -129,28 +155,57 @@ export const prepareProjectFilesForWorker = async (fileList: FileList) => {
 };
 
 export const buildDeepAnalysisGraph = (projectData: ProjectData, analysisResults: DeepAnalysisResult[]) => {
-  const newLinks: GraphLink[] = [];
-  const importanceMap: Record<string, number> = {};
-  const seenLinks = new Set<string>();
+  const newLinks: GraphLink[] = [...projectData.links];
+  const seenLinks = new Set<string>(
+    newLinks.map(link => {
+      const sourceId = getLinkNodeId(link.source);
+      const targetId = getLinkNodeId(link.target);
+      return `${normalizeProjectPath(sourceId)}::${normalizeProjectPath(targetId)}`;
+    })
+  );
+
   const resolveProjectFile = createProjectFileResolver(projectData.files);
 
   analysisResults.forEach((result) => {
+    const sourcePathNormalized = normalizeProjectPath(result.path);
+
+    // Elimina los links salientes existentes de este archivo para sobreescribirlos
+    for (let i = newLinks.length - 1; i >= 0; i--) {
+      const link = newLinks[i];
+      const sourceId = getLinkNodeId(link.source);
+      if (normalizeProjectPath(sourceId) === sourcePathNormalized) {
+        newLinks.splice(i, 1);
+        const targetId = getLinkNodeId(link.target);
+        seenLinks.delete(`${sourcePathNormalized}::${normalizeProjectPath(targetId)}`);
+      }
+    }
+
     result.dependencies.forEach((dep) => {
       const targetFile = resolveProjectFile(dep, result.path);
 
       if (targetFile && targetFile.id !== result.path) {
-        const linkKey = `${normalizeProjectPath(result.path)}::${normalizeProjectPath(targetFile.id)}`;
+        const linkKey = `${sourcePathNormalized}::${normalizeProjectPath(targetFile.id)}`;
         if (seenLinks.has(linkKey)) return;
         seenLinks.add(linkKey);
         newLinks.push({ source: result.path, target: targetFile.id });
-        importanceMap[targetFile.id] = (importanceMap[targetFile.id] || 0) + 1;
       }
     });
   });
 
+  const importanceMap: Record<string, number> = {};
+  newLinks.forEach((link) => {
+    const sourceId = getLinkNodeId(link.source);
+    const targetId = getLinkNodeId(link.target);
+    importanceMap[sourceId] = (importanceMap[sourceId] || 0) + 1;
+    importanceMap[targetId] = (importanceMap[targetId] || 0) + 1;
+  });
+
   const newNodes: GraphNode[] = projectData.nodes.map((node) => ({
     ...node,
-    size: Math.max(12, Math.min(32, 10 + (importanceMap[node.id] || 0) * 4)),
+    size: Math.max(
+      NODE_MIN_SIZE,
+      Math.min(NODE_MAX_SIZE, NODE_BASE_SIZE + (importanceMap[node.id] || 0) * NODE_IMPORTANCE_WEIGHT)
+    ),
     data: { ...node.data, importance: importanceMap[node.id] || 0 }
   }));
 

@@ -1,20 +1,15 @@
+import { AI_PROVIDER_DICTIONARY, AI_PROVIDER_FALLBACK, AIProviderId } from './aiProviders';
+
 const ENV = import.meta.env as Record<string, string | undefined>;
 
-const DEFAULT_PROVIDER_MODELS = {
-  gemini: ENV.VITE_DEFAULT_GEMINI_MODEL || '',
-  openai: ENV.VITE_DEFAULT_OPENAI_MODEL || '',
-  groq: ENV.VITE_DEFAULT_GROQ_MODEL || '',
-  deepseek: ENV.VITE_DEFAULT_DEEPSEEK_MODEL || '',
-  openrouter: ENV.VITE_DEFAULT_OPENROUTER_MODEL || '',
-  mistral: ENV.VITE_DEFAULT_MISTRAL_MODEL || '',
-  ollama: ENV.VITE_DEFAULT_OLLAMA_MODEL || ''
-} as const;
+export const DEFAULT_AI_PROVIDER = AI_PROVIDER_FALLBACK;
 
-export const DEFAULT_AI_PROVIDER = ENV.VITE_DEFAULT_AI_PROVIDER || 'gemini';
-
-export const DEFAULT_AI_MODELS: Record<string, string> = {
-  ...DEFAULT_PROVIDER_MODELS
-};
+export const DEFAULT_AI_MODELS: Record<string, string> = Object.fromEntries(
+  Object.values(AI_PROVIDER_DICTIONARY).map((provider) => [
+    provider.id,
+    ENV[provider.defaultModelEnv] || ''
+  ])
+);
 
 export const getDefaultAiModel = (provider: string) =>
-  DEFAULT_AI_MODELS[provider] || ENV.VITE_DEFAULT_FALLBACK_MODEL || '';
+  DEFAULT_AI_MODELS[provider as AIProviderId] || ENV.VITE_DEFAULT_FALLBACK_MODEL || '';

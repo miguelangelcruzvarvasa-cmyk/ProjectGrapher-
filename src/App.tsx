@@ -26,6 +26,7 @@ import Markdown from 'react-markdown';
 export default function App() {
   const {
     projectData, skippedCount, selectedNode, smartDiffData, projectMemory, isProcessing, isReviewing,
+    processingProgress,
     searchQuery, treeSearch, activeTab, isFocusMode, aiReview, aiError,
     showFileModal, showIAModal,
     setProjectData, setSelectedNode, setSearchQuery, setTreeSearch,
@@ -79,6 +80,11 @@ export default function App() {
     focusNodeByProjectPath
   } = useAppController();
   const [exportAssetTab, setExportAssetTab] = React.useState<'snapshot' | 'brief' | 'technical' | 'guide' | 'raw'>('snapshot');
+  const mostCriticalFile = React.useMemo(() => {
+    if (!projectData?.files || projectData.files.length === 0) return null;
+    return [...projectData.files].sort((a, b) => (b.importance || 0) - (a.importance || 0))[0];
+  }, [projectData]);
+
   const downloadFileBatch = React.useCallback((files: { filename: string; content: string; type: string }[]) => {
     files.forEach((file, index) => {
       window.setTimeout(() => {
@@ -129,6 +135,7 @@ export default function App() {
       <EmptyProjectState
         cn={cn}
         isProcessing={isProcessing}
+        processingProgress={processingProgress}
         onProcessFiles={processFiles}
         showSettingsModal={showSettingsModal}
         setShowSettingsModal={setShowSettingsModal}
@@ -419,6 +426,25 @@ export default function App() {
                           <p className="mt-2 text-sm text-gray-300">{impactAnalysisData.summary}</p>
                         </div>
 
+                        {mostCriticalFile && (
+                          <div className="rounded-2xl bg-red-950/30 border border-red-500/20 p-3">
+                            <div className="text-[10px] font-bold uppercase tracking-wider text-red-400 flex items-center gap-1">
+                              ⚠️ Nodo Crítico Principal
+                            </div>
+                            <p className="mt-1 text-[11px] text-gray-400 leading-relaxed">
+                              El archivo más conectado del proyecto es <strong className="text-white font-mono">{mostCriticalFile.path}</strong> (centralidad: {mostCriticalFile.importance}). Modificarlo conlleva un alto riesgo de fallos en cascada.
+                            </p>
+                            {selectedNode?.id !== mostCriticalFile.id && (
+                              <button
+                                onClick={() => focusNodeByProjectPath(mostCriticalFile.path)}
+                                className="mt-2 text-[10px] font-bold text-red-400 hover:text-red-300 underline"
+                              >
+                                Enfocar nodo crítico
+                              </button>
+                            )}
+                          </div>
+                        )}
+
                         <div className="space-y-2">
                           <div className="text-[10px] font-black uppercase tracking-[0.2em] text-gray-500">Consumidores directos</div>
                           {impactAnalysisData.directDependents.length ? impactAnalysisData.directDependents.slice(0, 4).map((item) => (
@@ -504,6 +530,23 @@ export default function App() {
                         <div className="text-xl font-bold text-white">{projectData.links.length}</div>
                       </div>
                     </div>
+
+                    {mostCriticalFile && (
+                      <button
+                        onClick={() => focusNodeByProjectPath(mostCriticalFile.path)}
+                        className="w-full text-left bg-brand-bg/50 border border-gray-800 p-6 rounded-3xl hover:border-red-500/30 transition-all group"
+                      >
+                        <div className="text-xs text-gray-500 mb-1 flex items-center gap-1">
+                          <span className="text-red-400">⚠️</span> Nodo Más Crítico del Proyecto
+                        </div>
+                        <div className="text-sm font-mono font-bold text-white truncate group-hover:text-red-400 transition-colors">
+                          {mostCriticalFile.path}
+                        </div>
+                        <div className="mt-1 text-[10px] text-gray-500 uppercase tracking-wider">
+                          Centralidad de Conexiones: {mostCriticalFile.importance}
+                        </div>
+                      </button>
+                    )}
                   </div>
 
                   <div className="bg-brand-bg/50 border border-gray-800 p-6 rounded-3xl relative overflow-hidden group">

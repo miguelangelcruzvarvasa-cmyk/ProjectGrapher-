@@ -1,6 +1,60 @@
+import { APP_CONFIG } from '../config/appConfig';
 import { ProjectData } from '../types';
-import { buildFileTree, generateTreeText } from '../utils/analysis';
+import { SNAPSHOT_EXPORT_CONFIG } from '../config/projectContext';
+import { buildFileTree, generateTreeText, summarizeFileSemantics } from '../utils/analysis';
 import { detectTechStackSignals, formatProjectPaths, getTopItems, withProjectRoot } from './projectInsights';
+
+const TRIVIAL_FILE_PATTERNS = [
+  /errorboundary/i,
+  /filicon/i,
+  /navitem/i,
+  /loading/i,
+  /spinner/i,
+  /placeholder/i,
+];
+
+export const hashContext = (content: string): string => {
+  let hash = 0;
+  const len = content.length;
+  const chunkSize = Math.max(1, Math.floor(len / 100));
+  for (let i = 0; i < len; i += chunkSize) {
+    const char = content.charCodeAt(i);
+    hash = ((hash << 5) - hash) + char;
+    hash = hash & hash;
+  }
+  return hash.toString(36);
+};
+
+export const isContextDuplicate = (content: string, lastHash: string | null): boolean => {
+  if (!lastHash) return false;
+  return hashContext(content) === lastHash;
+};
+
+export const buildCompactDelta = (currentSnapshot: string, previousSnapshot: string | null): string => {
+  if (!previousSnapshot) return currentSnapshot;
+
+  const currentLines = currentSnapshot.split('\n');
+  const previousLines = new Set(previousSnapshot.split('\n'));
+
+  const newLines = currentLines.filter(line => !previousLines.has(line));
+  if (newLines.length < currentLines.length * 0.3) {
+    return `# Contexto Delta (solo cambios)\n\n${newLines.join('\n')}\n\n---\nSnapshot completo anterior disponible.`;
+  }
+  return currentSnapshot;
+};
+
+const isTrivialFile = (fileName: string, lineCount: number, exportCount: number): boolean => {
+  if (lineCount < 40 && exportCount <= 2) return true;
+  if (TRIVIAL_FILE_PATTERNS.some(p => p.test(fileName))) return true;
+  return false;
+};
+
+const compressFileSummary = (fileName: string, semantics: { role: string; complexity: string; lines: number; exports: string[] }): string => {
+  if (isTrivialFile(fileName, semantics.lines, semantics.exports.length)) {
+    return `${semantics.role} trivial (${semantics.lines}L, ${semantics.exports.length || 1} export)`;
+  }
+  return `${semantics.role}; complejidad ${semantics.complexity}; ${semantics.lines} lineas; exports ${getTopItems(semantics.exports, 5)}`;
+};
 
 const ENTRY_FILE_NAMES = ['main.tsx', 'main.jsx', 'app.tsx', 'app.jsx', 'main.py', 'server.js', 'index.js', 'index.ts'];
 
@@ -21,6 +75,80 @@ const LANGUAGE_MAP: Record<string, string> = {
   '.scss': 'SCSS',
   '.vue': 'Vue',
   '.svelte': 'Svelte'
+};
+
+const takeLimited = <T>(items: T[], limit: number) => items.slice(0, limit);
+
+const buildHotspotConnectionProfiles = (
+  projectData: ProjectData,
+  projectName: string,
+  hotspotNodeIds: string[]
+) => {
+  if (!hotspotNodeIds.length) return '';
+
+  const rootPath = (path: string) => withProjectRoot(projectName, path);
+  let text = '## Estructura de Conexiones por Nodo\n';
+  text += 'Este bloque ayuda a explicar cómo se conecta cada archivo crítico dentro del grafo para que otro agente o persona entienda el mapa sin abrir el canvas.\n\n';
+
+  hotspotNodeIds.forEach((nodeId) => {
+    const node = projectData.nodes.find((item) => item.id === nodeId);
+    const file = projectData.files.find((item) => item.id === nodeId);
+    if (!node || !file) return;
+    const semantic = summarizeFileSemantics(file);
+
+    const directDependencies = projectData.links
+      .filter((link) => {
+        const sourceId = typeof link.source === 'object' ? (link.source as any).id : link.source;
+        return sourceId === nodeId;
+      })
+      .map((link) => {
+        const targetId = typeof link.target === 'object' ? (link.target as any).id : link.target;
+        const targetFile = projectData.files.find((item) => item.id === targetId);
+        return targetFile ? rootPath(targetFile.path) : null;
+      })
+      .filter(Boolean) as string[];
+
+    const directDependents = projectData.links
+      .filter((link) => {
+        const targetId = typeof link.target === 'object' ? (link.target as any).id : link.target;
+        return targetId === nodeId;
+      })
+      .map((link) => {
+        const sourceId = typeof link.source === 'object' ? (link.source as any).id : link.source;
+        const sourceFile = projectData.files.find((item) => item.id === sourceId);
+        return sourceFile ? rootPath(sourceFile.path) : null;
+      })
+      .filter(Boolean) as string[];
+
+    const secondaryImpact = new Set<string>();
+    directDependents.forEach((dependentPath) => {
+      const dependentFile = projectData.files.find((item) => rootPath(item.path) === dependentPath);
+      if (!dependentFile) return;
+      projectData.links.forEach((link) => {
+        const sourceId = typeof link.source === 'object' ? (link.source as any).id : link.source;
+        const targetId = typeof link.target === 'object' ? (link.target as any).id : link.target;
+        if (sourceId !== dependentFile.id || targetId === nodeId) return;
+        const targetFile = projectData.files.find((item) => item.id === targetId);
+        if (targetFile) {
+          secondaryImpact.add(rootPath(targetFile.path));
+        }
+      });
+    });
+
+    text += `### ${node.label}\n`;
+    text += `- Archivo: ${rootPath(file.path)}\n`;
+    text += `- Centralidad: ${file.importance || 0}\n`;
+    text += `- Rol inferido: ${semantic.role}\n`;
+    text += `- Complejidad estimada: ${semantic.complexity}\n`;
+    text += `- Lineas no vacias: ${semantic.nonEmptyLines || semantic.lines}\n`;
+    text += `- Confianza de lectura: ${semantic.confidence} (${semantic.evidence})\n`;
+    text += `- Contratos detectados: ${getTopItems(semantic.exports, 6)}\n`;
+    text += `- Usa directamente: ${getTopItems(directDependencies, SNAPSHOT_EXPORT_CONFIG.maxNodeConnectionsPerHotspot)}\n`;
+    text += `- Es usado por: ${getTopItems(directDependents, SNAPSHOT_EXPORT_CONFIG.maxNodeConnectionsPerHotspot)}\n`;
+    text += `- Impacto secundario probable: ${getTopItems(Array.from(secondaryImpact), SNAPSHOT_EXPORT_CONFIG.maxNodeConnectionsPerHotspot)}\n\n`;
+  });
+
+  return text;
 };
 
 const getGeneratedAtLabel = () => new Date().toLocaleString();
@@ -170,7 +298,7 @@ const getSourceOfTruthCandidates = (projectData: ProjectData, projectName: strin
     const matches = files
       .filter((file) => rule.matcher(file.path.toLowerCase(), file.content.toLowerCase(), file.name.toLowerCase()))
       .sort((a, b) => (b.importance || 0) - (a.importance || 0))
-      .slice(0, 3)
+      .slice(0, SNAPSHOT_EXPORT_CONFIG.maxFilesPerSourceGroup)
       .map((file) => rootPath(file.path));
 
     return {
@@ -186,8 +314,8 @@ const buildSourcesOfTruthBlock = (projectData: ProjectData, projectName: string)
   if (!groups.length) return '';
 
   let text = '## Fuentes de Verdad\n';
-  text += 'Esta sección intenta separar el mapa técnico de los archivos donde probablemente viven decisiones reales del sistema.\n';
-  groups.forEach((group) => {
+  text += 'Esta sección es heurística. Señala archivos donde probablemente viven decisiones reales del sistema según ruta, nombre y señales del código.\n';
+  takeLimited(groups, SNAPSHOT_EXPORT_CONFIG.maxSourceGroups).forEach((group) => {
     text += `- ${group.label}: ${group.files.join(', ')}\n`;
     text += `  Nota: ${group.summary}\n`;
   });
@@ -233,7 +361,7 @@ const getCriticalFlowCandidates = (projectData: ProjectData, projectName: string
         return flow.terms.some((term) => haystack.includes(term));
       })
       .sort((a, b) => (b.importance || 0) - (a.importance || 0))
-      .slice(0, 4)
+      .slice(0, SNAPSHOT_EXPORT_CONFIG.maxFilesPerFlow)
       .map((file) => rootPath(file.path));
 
     return {
@@ -248,8 +376,8 @@ const buildCriticalFlowsBlock = (projectData: ProjectData, projectName: string) 
   if (!flows.length) return '';
 
   let text = '## Flujos Críticos\n';
-  text += 'No pretende documentar todo el negocio. Intenta marcar rutas de lectura que suelen cambiar decisiones antes de editar código.\n';
-  flows.forEach((flow) => {
+  text += 'Esta sección es heurística. No documenta todo el negocio; marca rutas de lectura que suelen cambiar decisiones antes de editar código.\n';
+  takeLimited(flows, SNAPSHOT_EXPORT_CONFIG.maxCriticalFlows).forEach((flow) => {
     text += `\n### ${flow.label}\n`;
     text += `- Por qué importa: ${flow.why}\n`;
     text += `- Archivos guía: ${flow.files.join(', ')}\n`;
@@ -259,12 +387,8 @@ const buildCriticalFlowsBlock = (projectData: ProjectData, projectName: string) 
 };
 
 export const generateAIContextExport = (projectData: ProjectData, projectName: string) => {
-  const normalizedName = projectName || 'Unknown Project';
+  const normalizedName = projectName || APP_CONFIG.projectFallbackName;
   const rootPath = (path: string) => withProjectRoot(normalizedName, path);
-  const filesWithRoot = projectData.files.map((file) => ({
-    ...file,
-    path: rootPath(file.path)
-  }));
   const stack = new Set<string>();
 
   projectData.files.forEach((file) => {
@@ -335,8 +459,9 @@ export const generateAIContextExport = (projectData: ProjectData, projectName: s
   const productCoreFileList = productCoreFiles.map((file) => rootPath(file.path));
   const topNodes = [...projectData.nodes]
     .sort((a, b) => (b.data.importance || 0) - (a.data.importance || 0))
-    .slice(0, 8);
-  const topHotspots = topNodes.map((node) => `${node.label} [${node.data.importance}]`);
+    .slice(0, SNAPSHOT_EXPORT_CONFIG.maxHotspots);
+  const hotspotSemantics = topNodes.map((node) => summarizeFileSemantics(node.data));
+  const topHotspots = topNodes.map((node) => `${node.label} (${rootPath(node.id)}) [${node.data.importance}]`);
   const connectionMap = new Map<string, { outgoing: string[]; incoming: string[] }>();
 
   projectData.nodes.forEach((node) => {
@@ -373,9 +498,9 @@ export const generateAIContextExport = (projectData: ProjectData, projectName: s
       };
     })
     .sort((a, b) => b.total - a.total)
-    .slice(0, 10);
+    .slice(0, SNAPSHOT_EXPORT_CONFIG.maxGraphLeaders);
 
-  const topRelations = projectData.links.slice(0, 20).map((link) => {
+  const topRelations = projectData.links.slice(0, SNAPSHOT_EXPORT_CONFIG.maxGraphLeaders).map((link) => {
     const sourceId = typeof link.source === 'object' ? (link.source as any).id : link.source;
     const targetId = typeof link.target === 'object' ? (link.target as any).id : link.target;
     const sourceNode = projectData.nodes.find((node) => node.id === sourceId);
@@ -400,97 +525,95 @@ export const generateAIContextExport = (projectData: ProjectData, projectName: s
     capabilityList.length > 0 ? `Las capacidades detectadas del producto son ${getTopItems(capabilityList, 8)}.` : null
   ].filter(Boolean).join(' ');
 
-  let context = '### ARCHITECTURAL INTELLIGENCE SNAPSHOT\n';
+  const layerEntries = Object.entries(
+    projectData.files.reduce<Record<string, string[]>>((acc, file) => {
+      const parts = file.path.split('/');
+      const layer = parts.length > 1 ? parts[0] : 'root';
+      if (!acc[layer]) {
+        acc[layer] = [];
+      }
+      if (acc[layer].length < SNAPSHOT_EXPORT_CONFIG.maxLayerFiles) {
+        acc[layer].push(file.name);
+      }
+      return acc;
+    }, {})
+  );
+
+  const directorySummary = Array.from(directories)
+    .sort((a, b) => a.localeCompare(b))
+    .slice(0, SNAPSHOT_EXPORT_CONFIG.maxDirectories)
+    .map((directory) => `- ${directory}`)
+    .join('\n');
+
+  let context = '# Architectural Snapshot\n\n';
   context += `Project Context: ${normalizedName}\n`;
   context += `Tech Stack: ${Array.from(stack).join(', ') || 'Standard Web/App Stack'}\n`;
   context += `Scale: ${projectData.files.length} Analyzed Modules\n\n`;
-  context += buildExportMetadataBlock(normalizedName, 'snapshot.md');
+  context += buildExportMetadataBlock(normalizedName, SNAPSHOT_EXPORT_CONFIG.deterministicExportName);
 
-  context += '### PROJECT IDENTITY\n';
-  context += `One-line Description: ${normalizedName} es un proyecto enfocado en ${inferredPurpose || 'análisis y visualización de arquitectura de software'}.\n`;
-  context += `Architecture Summary: ${architectureSummary || 'No se pudo inferir un resumen arquitectónico fuerte con el conjunto actual de archivos.'}\n`;
-  context += `Primary Entry Points: ${getTopItems(formatProjectPaths(normalizedName, entryPoints), 8)}\n`;
-  context += `Main Directories: ${getTopItems(Array.from(directories), 10)}\n`;
-  context += `Dominant File Types: ${getTopItems(dominantExt, 5)}\n\n`;
+  context += '## Qué Pasarle A Un Agente\n';
+  context += '- Instrucciones operativas de la tarea actual.\n';
+  context += '- Este snapshot como contexto base del repositorio.\n';
+  context += '- Los archivos concretos que el snapshot marca como hotspots o fuentes de verdad.\n';
+  context += '- No le pases dumps largos de código salvo que la tarea ya esté localizada.\n\n';
 
-  context += '### PRODUCT CAPABILITIES\n';
-  context += `Core Product Capabilities: ${getTopItems(capabilityList, 10)}\n`;
-  context += `Core Product Files: ${getTopItems(productCoreFileList, 8)}\n`;
-  context += 'Analysis Mode Split: Deterministic local analysis first, optional AI enrichment second.\n';
-  context += 'Important Framing: No describas este proyecto solo como visualizador de grafo si las capacidades detectadas muestran handoff, task packs, error packs, impacto, búsqueda semántica o memoria de proyecto.\n\n';
+  context += '## Lectura de Confianza\n';
+  context += '- Hechos verificables: entry points detectados, tipos de archivo, relaciones del grafo, conexiones entrantes/salientes, contratos extraídos por regex y métricas de tamaño.\n';
+  context += '- Heurísticas: fuentes de verdad, flujos críticos, rol inferido del archivo y complejidad estimada.\n\n';
 
-  context += '### EXPLICIT CONSTRAINTS\n';
-  context += 'Deployment Model: local-first tool. No asumir SaaS, multiusuario ni servicio remoto salvo evidencia explícita.\n';
-  context += 'Authentication: no se detectó autenticación, cuentas de usuario ni login como capacidad central del producto.\n';
-  context += 'Persistence Model: la persistencia detectada es local. No afirmar almacenamiento en nube, base de datos de usuarios ni sincronización remota sin evidencia explícita.\n';
-  context += 'Inference Rule: si una capacidad no aparece en archivos, rutas, dependencias o funciones detectadas, no la inventes.\n\n';
+  context += '## Identidad del Proyecto\n';
+  context += `- Descripción: ${normalizedName} está orientado a ${inferredPurpose || 'extraer contexto estructural útil desde un repositorio local'}.\n`;
+  context += `- Resumen arquitectónico: ${architectureSummary || 'No se pudo inferir un resumen arquitectónico fuerte con el conjunto actual de archivos.'}\n`;
+  context += `- Entry points probables: ${getTopItems(formatProjectPaths(normalizedName, entryPoints), SNAPSHOT_EXPORT_CONFIG.maxEntryPoints)}\n`;
+  context += `- Directorios principales: ${getTopItems(Array.from(directories), SNAPSHOT_EXPORT_CONFIG.maxDirectories)}\n`;
+  context += `- Tipos de archivo dominantes: ${getTopItems(dominantExt, 5)}\n\n`;
+
+  context += '## Capacidades Detectadas\n';
+  context += `- Capacidades base: ${getTopItems(capabilityList, 8)}\n`;
+  context += `- Archivos núcleo: ${getTopItems(productCoreFileList, SNAPSHOT_EXPORT_CONFIG.maxEntryPoints)}\n`;
+  context += '- Estrategia: análisis determinístico primero y enriquecimiento con IA solo como capa opcional.\n\n';
+
+  context += '## Restricciones de Lectura\n';
+  context += '- Modelo local-first: no asumir SaaS, multiusuario ni servicio remoto sin evidencia explícita.\n';
+  context += '- Persistencia: la persistencia detectada es local; no afirmar nube o base de datos de usuarios sin evidencia.\n';
+  context += '- Regla de inferencia: si una capacidad no aparece en archivos, rutas, dependencias o funciones detectadas, no la inventes.\n\n';
+
   context += buildSourcesOfTruthBlock(projectData, normalizedName);
   context += buildCriticalFlowsBlock(projectData, normalizedName);
 
-  context += '### ESTRUCTURA DE DIRECTORIOS\n';
-  context += `${generateTreeText(buildFileTree(filesWithRoot))}\n`;
+  context += '## Prioridad de Lectura\n';
+  context += `${topHotspots.map((hotspot, index) => `${index + 1}. ${hotspot}`).join('\n')}\n\n`;
 
-  context += '### MODULE LAYER OVERVIEW\n';
-  const layers: Record<string, string[]> = {};
-  projectData.files.forEach((file) => {
-    const parts = file.path.split('/');
-    const layer = parts.length > 1 ? parts[0] : 'root';
-    if (!layers[layer]) layers[layer] = [];
-    if (layers[layer].length < 10) layers[layer].push(file.name);
+  context += '## Hotspots con Contrato Corto\n';
+  topNodes.forEach((node, index) => {
+    const semantic = hotspotSemantics[index];
+    const summary = compressFileSummary(node.label, {
+      role: semantic.role,
+      complexity: semantic.complexity,
+      lines: semantic.nonEmptyLines || semantic.lines,
+      exports: semantic.exports
+    });
+    context += `- ${node.label}: ${summary}\n`;
+  });
+  context += '\n';
+
+  context += '## Capas y Directorios\n';
+  context += `${directorySummary || '- Sin directorios principales detectables'}\n\n`;
+  layerEntries.forEach(([layer, files]) => {
+    context += `- [${layer.toUpperCase()}] ${files.join(', ')}\n`;
   });
 
-  Object.entries(layers).forEach(([layer, files]) => {
-    context += `- [${layer.toUpperCase()}]: ${files.join(', ')}${files.length >= 10 ? '...' : ''}\n`;
-  });
+  context += '\n## Relaciones Clave Del Grafo\n';
+  context += `${getTopItems(topRelations, SNAPSHOT_EXPORT_CONFIG.maxGraphLeaders)}\n\n`;
 
-  context += '\n### EXECUTIVE SUMMARY FOR AGENTS\n';
-  context += `- Project Goal: ${normalizedName} centraliza información del código para convertir un proyecto local en contexto accionable para humanos y agentes.\n`;
-  context += '- Key Flows: Carga de archivos -> análisis local -> grafo y hotspots -> task packs / error packs / semantic search / impact analysis -> exportación de artefactos -> revisión con IA opcional.\n';
-  context += `- Product Differentiators: ${getTopItems(capabilityList, 8)}\n`;
-  context += `- Critical Hotspots: ${getTopItems(topHotspots, 6)}\n`;
-  context += `- Sample Dependency Paths: ${getTopItems(topRelations, 8)}\n`;
-
-  context += '\n### GRAPH INTERPRETATION GUIDE\n';
-  context += 'Este grafo representa dependencias entre archivos. Si un archivo A apunta a B, normalmente significa que A importa, usa o depende de B.\n';
-  context += 'Los nodos con muchas conexiones entrantes suelen ser piezas centrales o utilidades compartidas. Los nodos con muchas conexiones salientes suelen ser orquestadores, pantallas principales o servicios que coordinan otros módulos.\n';
+  context += '## Lectura del Grafo\n';
   graphLeaders.forEach((leader) => {
     context += `- ${leader.label}: ${leader.total} conexiones totales (${leader.outgoing} salientes, ${leader.incoming} entrantes). `;
     context += `Usa -> ${getTopItems(leader.outgoingTargets, 4)}. `;
     context += `Es usado por -> ${getTopItems(leader.incomingSources, 4)}.\n`;
   });
 
-  context += '\n### STRATEGIC CLASS/FILE RELATIONSHIPS\n';
-  projectData.nodes.forEach((node) => {
-    const deps = projectData.links
-      .filter((link) => {
-        const sourceId = typeof link.source === 'object' ? (link.source as any).id : link.source;
-        return sourceId === node.id;
-      })
-      .map((link) => {
-        const targetId = typeof link.target === 'object' ? (link.target as any).id : link.target;
-        const targetNode = projectData.nodes.find((candidate) => candidate.id === targetId);
-        return targetNode?.label || targetId;
-      });
-
-    if (deps.length > 0) {
-      context += `[${node.label}] calls -> (${deps.join(', ')})\n`;
-    }
-  });
-
-  context += '\n### KEY SOURCE CODE (COMPRESSED TOP 12)\n';
-  const keyFiles = [...projectData.files]
-    .sort((a, b) => (b.importance || 0) - (a.importance || 0))
-    .slice(0, 12);
-
-  keyFiles.forEach((file) => {
-    const lines = file.content.split('\n');
-    const compressedCode = lines
-      .filter((line) => !line.trim().startsWith('//') && !line.trim().startsWith('/*'))
-      .slice(0, 80)
-      .join('\n');
-
-    context += `\n--- SOURCE: ${rootPath(file.path)} ---\n\`\`\`${file.ext.replace('.', '')}\n${compressedCode}${lines.length > 80 ? '\n// ... code continues (truncated for efficiency)' : ''}\n\`\`\`\n`;
-  });
+  context += `\n${buildHotspotConnectionProfiles(projectData, normalizedName, topNodes.map((node) => node.id))}`;
 
   return context;
 };
@@ -704,7 +827,7 @@ export const generateTreeOnlyExport = (projectData: ProjectData, projectName: st
   const tree = buildFileTree(
     projectData.files.map((file) => ({
       ...file,
-      path: withProjectRoot(projectName || 'Unknown Project', file.path)
+      path: withProjectRoot(projectName || APP_CONFIG.projectFallbackName, file.path)
     }))
   );
 

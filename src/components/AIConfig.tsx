@@ -3,6 +3,7 @@ import { Info, Check, Save, ShieldCheck, ShieldAlert, RefreshCw } from 'lucide-r
 import { useProjectStore } from '../store/useProjectStore';
 import { motion } from 'motion/react';
 import { DEFAULT_AI_MODELS } from '../config/aiDefaults';
+import { AI_PROVIDER_DICTIONARY, AI_PROVIDER_INPUTS, AI_PROVIDER_OPTIONS } from '../config/aiProviders';
 
 export const AIConfig: React.FC = () => {
   const {
@@ -29,17 +30,7 @@ export const AIConfig: React.FC = () => {
   const isSessionOverrideActive = customKey.trim().length > 0;
   const providerDetails = envKeyDetails[aiProvider];
   const envLabel = providerDetails?.envVar || `${aiProvider.toUpperCase()}_API_KEY`;
-  const providerDisplayName: Record<string, string> = {
-    gemini: 'Gemini',
-    openai: 'OpenAI',
-    groq: 'Groq',
-    deepseek: 'DeepSeek',
-    openrouter: 'OpenRouter',
-    mistral: 'Mistral',
-    ollama: 'Ollama',
-    custom: 'Proveedor personalizado'
-  };
-  const currentProviderName = providerDisplayName[aiProvider] || aiProvider;
+  const currentProviderName = AI_PROVIDER_DICTIONARY[aiProvider as keyof typeof AI_PROVIDER_DICTIONARY]?.shortLabel || aiProvider;
 
   return (
     <div className="space-y-6">
@@ -83,14 +74,9 @@ export const AIConfig: React.FC = () => {
             }}
             className="w-full bg-brand-bg border border-gray-700 rounded-xl py-2 px-3 text-sm text-white focus:outline-none focus:border-brand-primary transition-all"
           >
-            <option value="gemini">Google Gemini</option>
-            <option value="openai">OpenAI</option>
-            <option value="groq">Groq</option>
-            <option value="deepseek">DeepSeek</option>
-            <option value="openrouter">OpenRouter</option>
-            <option value="mistral">Mistral AI</option>
-            <option value="ollama">Ollama (Local)</option>
-            <option value="custom">Personalizado</option>
+            {AI_PROVIDER_OPTIONS.map((provider) => (
+              <option key={provider.id} value={provider.id}>{provider.label}</option>
+            ))}
           </select>
         </div>
 
@@ -111,7 +97,7 @@ export const AIConfig: React.FC = () => {
             type="password"
             value={customKey}
             onChange={(e) => setCustomKey(e.target.value)}
-            placeholder={isEnvActive ? "••••••••••••••••" : "sk-..."}
+            placeholder={isEnvActive ? "••••••••••••••••" : AI_PROVIDER_INPUTS.keyPlaceholder}
             className="w-full bg-brand-bg border border-gray-700 rounded-xl py-2 px-3 text-sm text-white focus:outline-none focus:border-brand-primary font-mono"
           />
           <p className="text-[9px] text-gray-500 mt-2 italic">
@@ -152,7 +138,7 @@ export const AIConfig: React.FC = () => {
               type="text"
               value={customUrl}
               onChange={(e) => setCustomUrl(e.target.value)}
-              placeholder="https://api.your-provider.com/v1"
+              placeholder={AI_PROVIDER_INPUTS.customUrlPlaceholder}
               className="w-full bg-brand-bg border border-gray-700 rounded-xl py-2 px-3 text-sm text-white focus:outline-none focus:border-brand-primary font-mono"
             />
           </motion.div>

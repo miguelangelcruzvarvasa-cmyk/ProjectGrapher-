@@ -32,7 +32,7 @@ Capacidades principales:
 
 - Grafo interactivo de archivos y dependencias
 - Detección de hotspots basada en importancia arquitectónica
-- Snapshots del proyecto optimizados para contexto de LLM
+- Snapshot arquitectónico compacto optimizado para contexto de LLM
 - Vistas sistémicas y resúmenes ejecutivos
 - Task packs para prompts como `ajusta el perfil del usuario y dime qué archivos modificar`
 - Error-to-Context Packs a partir de errores pegados desde tu proyecto local cargado
@@ -135,23 +135,14 @@ Su mayor diferenciador es la combinación de:
 
 ## Salidas Principales
 
-ProjectGrapher puede generar archivos como:
+ProjectGrapher prioriza pocas salidas con alto valor práctico:
 
-- `*_snapshot.md`
-- `*_executive_view.md`
-- `*_system_view.md`
-- `*_hotspots.md`
-- `*_task_pack.md`
-- `*_brief.md`
-- `*_project_summary.json`
-- `*_graph_guide.md`
-- `*_architecture_map.json`
-- `*_vision_ai.md`
-- `*_architecture_narrative_ai.md`
-- `*_refactor_priorities_ai.md`
-- `*_agent_handoff_ai.md`
+- `*_snapshot.md`: contexto base recomendado para iniciar una sesión o delegar a otro agente.
+- `*_task_pack.md`: contexto corto y localizado para una tarea concreta.
+- `*_error_context_pack.md`: contexto mínimo para depurar un error real del proyecto.
+- `*_agent_handoff_ai.md`: handoff consolidado cuando sí existe auditoría IA.
 
-Los archivos enriquecidos con IA se guardan automáticamente en la carpeta local `contexto/<nombre-del-proyecto>/` una vez que se genera una auditoría IA.
+Los exportes persistidos automáticamente en `contexto/<nombre-del-proyecto>/` ahora privilegian el snapshot determinístico y el handoff IA consolidado para evitar ruido documental.
 
 ## Capacidades Nuevas
 

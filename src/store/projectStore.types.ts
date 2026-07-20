@@ -6,7 +6,18 @@ export type ProjectInsights = {
   directories: string[];
   entryPoints: string[];
   dominantFileTypes: string[];
-  topHotspots: { label: string; path: string; importance: number; ext: string }[];
+  topHotspots: {
+    label: string;
+    path: string;
+    importance: number;
+    ext: string;
+    role: string;
+    confidence: 'high' | 'medium';
+    evidence: 'code' | 'path+code' | 'path';
+    complexity: 'low' | 'medium' | 'high';
+    lines: number;
+    exports: string[];
+  }[];
   topRelations: string[];
   graphLeaders: {
     label: string;
@@ -101,6 +112,22 @@ export type ProjectMemoryEntry = {
   fileNotes: Record<string, string>;
 };
 
+export type ProcessingStage =
+  | 'idle'
+  | 'scanning'
+  | 'reading'
+  | 'graph'
+  | 'persisting'
+  | 'deep-analysis';
+
+export type ProcessingProgress = {
+  stage: ProcessingStage;
+  message: string;
+  current: number;
+  total: number;
+  ratio: number;
+};
+
 export interface ProjectState {
   projectData: ProjectData | null;
   projectName: string;
@@ -109,6 +136,7 @@ export interface ProjectState {
   smartDiffData: SmartDiffData | null;
   projectMemory: Record<string, ProjectMemoryEntry>;
   isProcessing: boolean;
+  processingProgress: ProcessingProgress;
   isReviewing: boolean;
   searchQuery: string;
   treeSearch: string;
@@ -126,9 +154,12 @@ export interface ProjectState {
   showIAModal: boolean;
   envKeys: Record<string, boolean>;
   envKeyDetails: Record<string, { configured: boolean; envVar: string; source: 'env' | 'none' }>;
+  lastContextHash: string | null;
+  contextHistory: { hash: string; timestamp: number; task: string }[];
   setProjectData: (data: ProjectData | null) => void;
   setSkippedCount: (count: number) => void;
   setSelectedNode: (node: GraphNode | null) => void;
+  setProcessingProgress: (progress: ProcessingProgress) => void;
   setSearchQuery: (query: string) => void;
   setTreeSearch: (query: string) => void;
   setActiveTab: (tab: 'details' | 'context' | 'files' | 'ia' | 'settings') => void;
@@ -168,4 +199,7 @@ export interface ProjectState {
   generateAIAgentHandoff: (task: string) => string;
   refreshSmartDiff: () => Promise<void>;
   closeProject: () => void;
+  checkContextDuplicate: (content: string) => boolean;
+  recordContextSent: (content: string, task: string) => void;
+  getContextHistory: () => { hash: string; timestamp: number; task: string }[];
 }

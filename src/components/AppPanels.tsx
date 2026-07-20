@@ -5,26 +5,79 @@ import Markdown from 'react-markdown';
 import { AIConfig } from './AIConfig';
 import { Modal } from './Modal';
 import { GraphNode } from '../types';
+import { ProcessingProgress } from '../store/projectStore.types';
 
 type EmptyProjectStateProps = {
   cn: (...inputs: any[]) => string;
   isProcessing: boolean;
+  processingProgress: ProcessingProgress;
   onProcessFiles: (files: FileList) => void;
   showSettingsModal: boolean;
   setShowSettingsModal: (show: boolean) => void;
 };
 
+const PROCESSING_STAGE_LABELS: Record<ProcessingProgress['stage'], string> = {
+  idle: 'En espera',
+  scanning: 'Escaneando estructura',
+  reading: 'Leyendo archivos',
+  graph: 'Construyendo grafo',
+  persisting: 'Guardando snapshot',
+  'deep-analysis': 'Refinando arquitectura'
+};
+
 export function EmptyProjectState({
   cn,
   isProcessing,
+  processingProgress,
   onProcessFiles,
   showSettingsModal,
   setShowSettingsModal
 }: EmptyProjectStateProps) {
+  const progressPercent = Math.min(100, Math.max(6, Math.round((processingProgress.ratio || 0) * 100)));
+  const progressStageLabel = PROCESSING_STAGE_LABELS[processingProgress.stage] || 'Procesando';
+
   return (
     <div className="relative flex min-h-screen items-center justify-center overflow-hidden bg-brand-bg p-4 sm:p-6">
       <div className="absolute left-[-10%] top-[-10%] h-[40%] w-[40%] rounded-full bg-brand-primary/10 blur-[120px]" />
       <div className="absolute bottom-[-10%] right-[-10%] h-[40%] w-[40%] rounded-full bg-brand-secondary/10 blur-[120px]" />
+
+      {isProcessing && (
+        <div className="pointer-events-none absolute inset-0 z-20 flex items-center justify-center bg-brand-bg/72 px-4 backdrop-blur-sm">
+          <div className="w-full max-w-xl rounded-[2rem] border border-brand-primary/20 bg-[#07101d]/95 p-6 text-left shadow-[0_30px_100px_rgba(0,0,0,0.45)] sm:p-7">
+            <div className="flex items-start gap-4">
+              <div className="rounded-2xl border border-brand-primary/25 bg-brand-primary/10 p-3">
+                <Loader2 className="h-7 w-7 animate-spin text-brand-primary" />
+              </div>
+              <div className="min-w-0 flex-1">
+                <div className="text-[10px] font-black uppercase tracking-[0.24em] text-brand-primary">Motor Local Activo</div>
+                <h2 className="mt-2 text-2xl font-bold text-white">Analizando proyecto...</h2>
+                <p className="mt-2 text-sm leading-relaxed text-gray-300">
+                  {processingProgress.message || 'Procesando estructura, dependencias y contexto del proyecto.'}
+                </p>
+              </div>
+            </div>
+
+            <div className="mt-6 space-y-3">
+              <div className="flex items-center justify-between gap-4 text-[11px] uppercase tracking-[0.18em]">
+                <span className="font-black text-cyan-300">{progressStageLabel}</span>
+                <span className="font-mono text-gray-400">{progressPercent}%</span>
+              </div>
+              <div className="h-3 overflow-hidden rounded-full border border-white/8 bg-black/35">
+                <div
+                  className="h-full rounded-full bg-gradient-to-r from-brand-primary via-cyan-400 to-brand-secondary transition-all duration-300"
+                  style={{ width: `${progressPercent}%` }}
+                />
+              </div>
+              {processingProgress.total > 0 && (
+                <div className="flex items-center justify-between gap-3 text-xs text-gray-400">
+                  <span>{processingProgress.current.toLocaleString()} de {processingProgress.total.toLocaleString()} elementos</span>
+                  <span>La pantalla se actualizara al terminar esta fase.</span>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
 
       <motion.div
         initial={{ opacity: 0, y: 20 }}

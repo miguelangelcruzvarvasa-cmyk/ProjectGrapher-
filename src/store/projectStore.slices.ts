@@ -2,9 +2,10 @@ import type { StoreApi } from 'zustand';
 import { db } from '../db/projectDB';
 import { buildDeepAnalysisGraph, prepareProjectFilesForWorker } from './projectProcessing';
 import type { ProjectState } from './projectStore.types';
-import { generateAIContextExport, generateCriticalFlowsExport, generateGraphGuideExport, generateProjectBriefExport, generateProjectMetadataExport, generateTreeOnlyExport } from './projectExports';
+import { generateAIContextExport, generateCriticalFlowsExport, generateGraphGuideExport, generateProjectBriefExport, generateProjectMetadataExport, generateTreeOnlyExport, hashContext } from './projectExports';
 import { buildAIArchitectureNarrative, buildAIAgentHandoff, buildAIRefactorPriorities, buildAIVisionDocument, buildErrorContextPack, buildErrorContextPackData, buildExecutiveContext, buildHotspotReport, buildImpactAnalysisData, buildSemanticSearchResults, buildSmartDiffData, buildSystemView, buildTaskPack, buildTaskPackData, extractProjectInsights, formatProjectPaths } from './projectInsights';
 import { DEFAULT_AI_PROVIDER, getDefaultAiModel } from '../config/aiDefaults';
+import { APP_CONFIG } from '../config/appConfig';
 
 type SetState = StoreApi<ProjectState>['setState'];
 type GetState = StoreApi<ProjectState>['getState'];
@@ -12,12 +13,13 @@ type GetState = StoreApi<ProjectState>['getState'];
 let activeAnalysisRunId = 0;
 let activeAnalysisWorker: Worker | null = null;
 let activeDeepAnalysisController: AbortController | null = null;
+const buildApiUrl = (path: string) => `${APP_CONFIG.apiBaseUrl}${path}`;
 
 const getProjectInsights = (get: GetState) => {
   const state = get();
   if (!state.projectData) return null;
 
-  const projectName = state.projectName || 'Unknown Project';
+  const projectName = state.projectName || APP_CONFIG.projectFallbackName;
   return {
     projectData: state.projectData,
     projectName,
@@ -74,7 +76,7 @@ export const createAiSlice = (set: SetState, get: GetState) => ({
   },
   checkEnvKeys: async () => {
     try {
-      const res = await fetch('/api/ai/config');
+      const res = await fetch(buildApiUrl('/api/ai/config'));
       if (!res.ok) {
         throw new Error(`No se pudo consultar la configuración AI del servidor (${res.status})`);
       }
@@ -106,7 +108,7 @@ export const createAiSlice = (set: SetState, get: GetState) => ({
     try {
       const { aiProvider, aiModel, customUrl, customKey } = get();
       const context = generateAIContext();
-      const response = await fetch('/api/ai/review', {
+      const response = await fetch(buildApiUrl('/api/ai/review'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -142,7 +144,12 @@ export const createAiSlice = (set: SetState, get: GetState) => ({
       set({ aiReview: data.text });
     } catch (err: any) {
       console.error('AI Error:', err);
-      set({ aiError: `Error: ${err.message}` });
+      const msg = err.message || '';
+      let friendlyMessage = `Error: ${msg}`;
+      if (msg.includes('Failed to fetch') || msg.includes('NetworkError') || msg.includes('ERR_FAILED')) {
+        friendlyMessage = 'Error: No se pudo conectar al backend. Asegurate de que el servidor Python esté corriendo (npm run server)';
+      }
+      set({ aiError: friendlyMessage });
     } finally {
       set({ isReviewing: false });
     }
@@ -183,10 +190,20 @@ export const createProjectSlice = (set: SetState, get: GetState) => ({
   smartDiffData: null,
   projectMemory: {},
   isProcessing: false,
+  processingProgress: {
+    stage: 'idle',
+    message: '',
+    current: 0,
+    total: 0,
+    ratio: 0
+  },
   useDeepAnalysis: true,
+  lastContextHash: null,
+  contextHistory: [],
   setProjectData: (data: ProjectState['projectData']) => set({ projectData: data }),
   setSkippedCount: (count: number) => set({ skippedCount: count }),
   setSelectedNode: (node: ProjectState['selectedNode']) => set({ selectedNode: node }),
+  setProcessingProgress: (progress: ProjectState['processingProgress']) => set({ processingProgress: progress }),
   setProjectGlobalMemory: (note: string) => {
     const { projectName, projectMemory } = get();
     if (!projectName) return;
@@ -234,9 +251,31 @@ export const createProjectSlice = (set: SetState, get: GetState) => ({
       smartDiffData: null,
       aiReview: null,
       aiError: null,
+      processingProgress: {
+        stage: 'idle',
+        message: '',
+        current: 0,
+        total: 0,
+        ratio: 0
+      },
       activeTab: 'details'
     });
     await db.projects.clear();
+  },
+  checkContextDuplicate: (content: string) => {
+    const { lastContextHash } = get();
+    if (!lastContextHash) return false;
+    return hashContext(content) === lastContextHash;
+  },
+  recordContextSent: (content: string, task: string) => {
+    const { contextHistory } = get();
+    const hash = hashContext(content);
+    const newEntry = { hash, timestamp: Date.now(), task };
+    const updatedHistory = [newEntry, ...contextHistory].slice(0, 20);
+    set({ lastContextHash: hash, contextHistory: updatedHistory });
+  },
+  getContextHistory: () => {
+    return get().contextHistory;
   },
   refreshSmartDiff: async () => {
     const { projectData, projectName } = get();
@@ -271,15 +310,45 @@ export const createProjectSlice = (set: SetState, get: GetState) => ({
     const controller = new AbortController();
     activeDeepAnalysisController = controller;
 
-    set({ isProcessing: true });
-    try {
-      const filesToAnalyze = projectData.files.map((file) => ({
+    // Filter files supported by the backend deep analysis (Python Jedi, etc.)
+    const backendSupportedExtensions = ['py', 'cs', 'go', 'rs'];
+    const filesToAnalyze = projectData.files
+      .filter(file => backendSupportedExtensions.includes(file.ext.replace('.', '').toLowerCase()))
+      .map((file) => ({
         path: file.path,
         content: file.content,
         ext: file.ext.replace('.', '')
       }));
 
-      const response = await fetch('/api/analyze', {
+    // If there are no files to analyze deep, skip HTTP request entirely and finish
+    if (filesToAnalyze.length === 0) {
+      if (runId === activeAnalysisRunId) {
+        set({
+          isProcessing: false,
+          processingProgress: {
+            stage: 'idle',
+            message: '',
+            current: 0,
+            total: 0,
+            ratio: 0
+          }
+        });
+      }
+      return;
+    }
+
+    set({
+      isProcessing: true,
+      processingProgress: {
+        stage: 'deep-analysis',
+        message: 'Refinando el grafo con el backend Python...',
+        current: 0,
+        total: filesToAnalyze.length,
+        ratio: 0.85
+      }
+    });
+    try {
+      const response = await fetch(buildApiUrl('/api/analyze'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ files: filesToAnalyze }),
@@ -292,7 +361,16 @@ export const createProjectSlice = (set: SetState, get: GetState) => ({
       }
 
       const nextGraph = buildDeepAnalysisGraph(projectData, data.analysis);
-      set({ projectData: { ...projectData, nodes: nextGraph.nodes, links: nextGraph.links } });
+      set({
+        projectData: { ...projectData, nodes: nextGraph.nodes, links: nextGraph.links },
+        processingProgress: {
+          stage: 'deep-analysis',
+          message: 'Aplicando refinamiento final y preparando la vista del proyecto...',
+          current: filesToAnalyze.length,
+          total: filesToAnalyze.length,
+          ratio: 0.98
+        }
+      });
     } catch (err) {
       if ((err as Error).name === 'AbortError') {
         return;
@@ -303,7 +381,16 @@ export const createProjectSlice = (set: SetState, get: GetState) => ({
         activeDeepAnalysisController = null;
       }
       if (runId === activeAnalysisRunId) {
-        set({ isProcessing: false });
+        set({
+          isProcessing: false,
+          processingProgress: {
+            stage: 'idle',
+            message: '',
+            current: 0,
+            total: 0,
+            ratio: 0
+          }
+        });
       }
     }
   },
@@ -328,27 +415,69 @@ export const createProjectSlice = (set: SetState, get: GetState) => ({
       skippedCount: 0,
       smartDiffData: null,
       aiReview: null,
-      aiError: null
+      aiError: null,
+      processingProgress: {
+        stage: 'scanning',
+        message: 'Preparando la carga del proyecto...',
+        current: 0,
+        total: fileList.length,
+        ratio: 0.02
+      }
     });
 
     if (!fileList.length) {
       if (runId === activeAnalysisRunId) {
-        set({ isProcessing: false });
+        set({
+          isProcessing: false,
+          processingProgress: {
+            stage: 'idle',
+            message: '',
+            current: 0,
+            total: 0,
+            ratio: 0
+          }
+        });
       }
       return;
     }
 
-    const { projectName, skippedCount, workerInput } = await prepareProjectFilesForWorker(fileList);
+    // Yield to the browser here to let React render the loading modal!
+    await new Promise((resolve) => setTimeout(resolve, 80));
+
+    const { projectName, skippedCount, workerInput } = await prepareProjectFilesForWorker(fileList, (progress) => {
+      if (runId !== activeAnalysisRunId) return;
+      set({ processingProgress: progress });
+    });
     if (runId !== activeAnalysisRunId) {
       return;
     }
 
     if (!workerInput.length) {
-      set({ isProcessing: false, projectName, skippedCount });
+      set({
+        isProcessing: false,
+        projectName,
+        skippedCount,
+        processingProgress: {
+          stage: 'idle',
+          message: '',
+          current: 0,
+          total: 0,
+          ratio: 0
+        }
+      });
       return;
     }
 
-    set({ projectName });
+    set({
+      projectName,
+      processingProgress: {
+        stage: 'graph',
+        message: 'Enviando archivos al motor determinístico del grafo...',
+        current: 0,
+        total: workerInput.length,
+        ratio: 0.55
+      }
+    });
 
     const worker = new Worker(new URL('../workers/analysis.worker.ts', import.meta.url), { type: 'module' });
     activeAnalysisWorker = worker;
@@ -363,8 +492,23 @@ export const createProjectSlice = (set: SetState, get: GetState) => ({
         return;
       }
 
+      if (e.data?.progress) {
+        set({ processingProgress: e.data.progress });
+        return;
+      }
+
       const { projectData } = e.data;
-      set({ projectData, skippedCount });
+      set({
+        projectData,
+        skippedCount,
+        processingProgress: {
+          stage: 'persisting',
+          message: 'Guardando snapshot local y preparando comparación histórica...',
+          current: 1,
+          total: 2,
+          ratio: 0.75
+        }
+      });
 
       await db.projects.add({
         name: projectName,
@@ -389,7 +533,16 @@ export const createProjectSlice = (set: SetState, get: GetState) => ({
       }
 
       if (runId === activeAnalysisRunId) {
-        set({ isProcessing: false });
+        set({
+          isProcessing: false,
+          processingProgress: {
+            stage: 'idle',
+            message: '',
+            current: 0,
+            total: 0,
+            ratio: 0
+          }
+        });
       }
     };
 
@@ -400,14 +553,23 @@ export const createProjectSlice = (set: SetState, get: GetState) => ({
         activeAnalysisWorker = null;
       }
       if (runId === activeAnalysisRunId) {
-        set({ isProcessing: false });
+        set({
+          isProcessing: false,
+          processingProgress: {
+            stage: 'idle',
+            message: '',
+            current: 0,
+            total: 0,
+            ratio: 0
+          }
+        });
       }
     };
   },
   generateAIContext: () => {
     const { projectData, projectName } = get();
     if (!projectData) return '';
-    return generateAIContextExport(projectData, projectName || 'Unknown Project');
+    return generateAIContextExport(projectData, projectName || APP_CONFIG.projectFallbackName);
   },
   generateExecutiveView: () => {
     const context = getProjectInsights(get);
@@ -457,26 +619,26 @@ export const createProjectSlice = (set: SetState, get: GetState) => ({
   generateProjectBrief: () => {
     const { projectData, projectName } = get();
     if (!projectData) return '';
-    return generateProjectBriefExport(projectData, projectName || 'Unknown Project');
+    return generateProjectBriefExport(projectData, projectName || APP_CONFIG.projectFallbackName);
   },
   generateProjectMetadata: () => {
     const { projectData, projectName } = get();
     if (!projectData) return '';
-    return generateProjectMetadataExport(projectData, projectName || 'Unknown Project');
+    return generateProjectMetadataExport(projectData, projectName || APP_CONFIG.projectFallbackName);
   },
   generateGraphGuide: () => {
     const { projectData, projectName } = get();
     if (!projectData) return '';
-    return generateGraphGuideExport(projectData, projectName || 'Unknown Project');
+    return generateGraphGuideExport(projectData, projectName || APP_CONFIG.projectFallbackName);
   },
   generateCriticalFlows: () => {
     const { projectData, projectName } = get();
     if (!projectData) return '';
-    return generateCriticalFlowsExport(projectData, projectName || 'Unknown Project');
+    return generateCriticalFlowsExport(projectData, projectName || APP_CONFIG.projectFallbackName);
   },
   generateTreeOnly: () => {
     const { projectData, projectName } = get();
     if (!projectData) return '';
-    return generateTreeOnlyExport(projectData, projectName || 'Unknown Project');
+    return generateTreeOnlyExport(projectData, projectName || APP_CONFIG.projectFallbackName);
   }
 });

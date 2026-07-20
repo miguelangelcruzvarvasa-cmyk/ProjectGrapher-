@@ -16,31 +16,63 @@ const getClusterName = (path: string) => {
   return primary;
 };
 
-self.onmessage = async (e: MessageEvent<{ files: { path: string, content: string, size: number, name: string }[] }>) => {
+self.onmessage = async (e: MessageEvent<{ files: { path: string, file: File, size: number, name: string }[] }>) => {
   const { files: rawFiles } = e.data;
   const validFiles: ProjectFile[] = [];
   let skippedCount = 0;
+  const totalFiles = rawFiles.length;
 
-  // 1. Filter and process content
-  for (const file of rawFiles) {
-    if (!shouldProcessFile(file.path, file.size)) {
-      skippedCount++;
-      continue;
-    }
+  // 1. Filter and process content in batches asynchronously
+  const BATCH_SIZE = 100;
+  for (let index = 0; index < rawFiles.length; index += BATCH_SIZE) {
+    const batch = rawFiles.slice(index, index + BATCH_SIZE);
+    
+    // Filter out invalid files first to avoid reading them
+    const validBatch = batch.filter(item => shouldProcessFile(item.path, item.size));
+    skippedCount += (batch.length - validBatch.length);
 
     if (validFiles.length >= 1500) {
-      skippedCount += rawFiles.length - validFiles.length - skippedCount;
+      skippedCount += rawFiles.length - index;
       break;
     }
 
-    validFiles.push({
-      id: file.path,
-      name: file.name,
-      path: file.path,
-      content: file.content,
-      ext: getExtension(file.name),
-      size: file.size,
-      importance: 0
+    // Read batch in parallel
+    const readResults = await Promise.all(
+      validBatch.map(async (item) => {
+        try {
+          const content = await item.file.text();
+          return { ...item, content };
+        } catch (err) {
+          console.error(`Error reading ${item.path}:`, err);
+          return { ...item, content: '' };
+        }
+      })
+    );
+
+    for (const item of readResults) {
+      if (validFiles.length >= 1500) {
+        skippedCount++;
+        continue;
+      }
+      validFiles.push({
+        id: item.path,
+        name: item.name,
+        path: item.path,
+        content: item.content,
+        ext: getExtension(item.name),
+        size: item.size,
+        importance: 0
+      });
+    }
+
+    self.postMessage({
+      progress: {
+        stage: 'graph',
+        message: 'Leyendo archivos y construyendo el grafo...',
+        current: Math.min(index + batch.length, totalFiles),
+        total: totalFiles,
+        ratio: totalFiles ? Math.min(index + batch.length, totalFiles) / totalFiles : 0
+      }
     });
   }
 
@@ -50,6 +82,7 @@ self.onmessage = async (e: MessageEvent<{ files: { path: string, content: string
   const seenLinks = new Set<string>();
   const resolveProjectFile = createProjectFileResolver(validFiles);
 
+  let processedFiles = 0;
   for (const file of validFiles) {
     const deps = findDependencies(file.content, file.name);
     for (const depName of deps) {
@@ -69,8 +102,22 @@ self.onmessage = async (e: MessageEvent<{ files: { path: string, content: string
              source: file.id,
              target: target.id
           });
+          importanceMap[file.id] = (importanceMap[file.id] || 0) + 1;
           importanceMap[target.id] = (importanceMap[target.id] || 0) + 1;
        }
+    }
+
+    processedFiles += 1;
+    if (processedFiles % 50 === 0 || processedFiles === validFiles.length) {
+      self.postMessage({
+        progress: {
+          stage: 'graph',
+          message: 'Calculando conexiones y centralidad del grafo...',
+          current: processedFiles,
+          total: Math.max(validFiles.length, 1),
+          ratio: validFiles.length ? processedFiles / validFiles.length : 0
+        }
+      });
     }
   }
 

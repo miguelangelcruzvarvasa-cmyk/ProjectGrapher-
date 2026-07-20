@@ -6,7 +6,10 @@ import { VitePWA } from 'vite-plugin-pwa';
 
 export default defineConfig(({mode}) => {
   const env = loadEnv(mode, '.', '');
-  const apiTarget = env.VITE_API_URL || `http://localhost:${env.PORT || '8080'}`;
+  const backendHost = env.VITE_API_HOST || 'localhost';
+  const backendPort = env.PORT || '8080';
+  const frontendPort = Number(env.VITE_FRONTEND_PORT || '3000');
+  const apiTarget = env.VITE_API_URL || `http://${backendHost}:${backendPort}`;
   return {
     plugins: [
       react(), 
@@ -51,6 +54,7 @@ export default defineConfig(({mode}) => {
       },
     },
     server: {
+      port: frontendPort,
       hmr: process.env.DISABLE_HMR !== 'true',
       proxy: {
         '/api': {

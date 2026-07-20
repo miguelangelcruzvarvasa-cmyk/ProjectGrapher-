@@ -1,6 +1,8 @@
 import os
 import logging
 import re
+import asyncio
+from concurrent.futures import ThreadPoolExecutor
 from enum import Enum
 from pathlib import Path
 from typing import Optional, Dict, Any, List
@@ -21,6 +23,17 @@ logger = logging.getLogger(__name__)
 
 load_dotenv(os.path.join(os.path.dirname(__file__), '.env'))
 logger.info(f"Archivo .env cargado desde: {os.path.abspath('.env')}")
+
+APP_SETTINGS = {
+    "project_fallback_name": os.getenv("PROJECT_FALLBACK_NAME", "Unnamed_Project"),
+    "context_directory_name": os.getenv("CONTEXT_DIRECTORY_NAME", "contexto"),
+    "backend_title": os.getenv("BACKEND_TITLE", "ProjectGrapher AI Backend"),
+    "backend_label": os.getenv("BACKEND_LABEL", "Python/FastAPI"),
+    "backend_status": os.getenv("BACKEND_STATUS", "online"),
+    "backend_host": os.getenv("BACKEND_HOST", "0.0.0.0"),
+    "backend_port": int(os.getenv("PORT", "8080")),
+    "backend_reload": os.getenv("RELOAD", "false").lower() == "true",
+}
 
 PROVIDER_ENV_MAP = {
     "gemini": "GEMINI_API_KEY",
@@ -194,9 +207,9 @@ class ContextExportRequest(BaseModel):
 def sanitize_context_segment(value: Optional[str]) -> str:
     raw = (value or "").strip()
     safe = re.sub(r"[^a-zA-Z0-9._-]+", "_", raw).strip("._")
-    return safe or "Unknown_Project"
+    return safe or APP_SETTINGS["project_fallback_name"]
 
-app = FastAPI(title="ProjectGrapher AI Backend")
+app = FastAPI(title=APP_SETTINGS["backend_title"])
 
 app.add_middleware(
     CORSMiddleware,
@@ -298,14 +311,26 @@ Reglas importantes para este análisis:
 # --- ENDPOINTS ---
 ai_engine = AIEngine()
 deep_analyzer = DeepAnalyzer()
-CONTEXT_DIR = Path(__file__).resolve().parent / "contexto"
+CONTEXT_DIR = Path(__file__).resolve().parent / APP_SETTINGS["context_directory_name"]
+executor = ThreadPoolExecutor(max_workers=min(32, (os.cpu_count() or 1) + 4))
 
 @app.post("/api/analyze")
 async def analyze_project(request: AnalyzeRequest):
-    results = []
-    for file in request.files:
-        deps = deep_analyzer.extract_dependencies(file['content'], file.get('ext', ''), file.get('path', ''))
-        results.append({"path": file['path'], "dependencies": deps})
+    loop = asyncio.get_running_loop()
+    
+    def analyze_single_file(file):
+        deps = deep_analyzer.extract_dependencies(
+            file['content'], 
+            file.get('ext', ''), 
+            file.get('path', '')
+        )
+        return {"path": file['path'], "dependencies": deps}
+
+    tasks = [
+        loop.run_in_executor(executor, analyze_single_file, file)
+        for file in request.files
+    ]
+    results = await asyncio.gather(*tasks)
     return {"analysis": results}
 
 @app.post("/api/ai/review")
@@ -352,14 +377,18 @@ async def export_context_files(request: ContextExportRequest):
     return {
         "saved": saved_files,
         "directory": str(project_context_dir),
-        "relative_directory": f"contexto/{project_segment}"
+        "relative_directory": f"{APP_SETTINGS['context_directory_name']}/{project_segment}"
     }
 
 @app.get("/health")
 async def health():
-    return {"status": "online", "backend": "Python/FastAPI (Stable)"}
+    return {"status": APP_SETTINGS["backend_status"], "backend": APP_SETTINGS["backend_label"]}
 
 if __name__ == "__main__":
     import uvicorn
-    port = int(os.getenv("PORT", "8080"))
-    uvicorn.run("main:app", host="0.0.0.0", port=port, reload=True)
+    uvicorn.run(
+        app,
+        host=APP_SETTINGS["backend_host"],
+        port=APP_SETTINGS["backend_port"],
+        reload=APP_SETTINGS["backend_reload"]
+    )

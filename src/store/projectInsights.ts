@@ -1,4 +1,6 @@
 import { ProjectFile, ProjectData } from '../types';
+import { APP_CONFIG } from '../config/appConfig';
+import { summarizeFileSemantics } from '../utils/analysis';
 import {
   AgentTaskPackData,
   ErrorContextFileCandidate,
@@ -123,7 +125,7 @@ const scoreTermMatch = (haystack: string, term: string) => {
 };
 
 export const withProjectRoot = (projectName: string, path: string) => {
-  const normalizedProject = projectName.trim() || 'Unknown Project';
+  const normalizedProject = projectName.trim() || APP_CONFIG.projectFallbackName;
   const normalizedPath = path.replace(/\\/g, '/').replace(/^\/+/, '');
   if (!normalizedPath) return normalizedProject;
   if (normalizedPath === normalizedProject || normalizedPath.startsWith(`${normalizedProject}/`)) {
@@ -135,6 +137,30 @@ export const withProjectRoot = (projectName: string, path: string) => {
 export const formatProjectPaths = (projectName: string, items: string[]) =>
   items.filter(Boolean).map((item) => withProjectRoot(projectName, item));
 
+const detectByImport = (code: string, patterns: RegExp[]): boolean =>
+  patterns.some(p => p.test(code));
+
+const IMPORT_PATTERNS: Record<string, RegExp[]> = {
+  'React': [/\bfrom\s+['"]react['"]/i, /import\s+.*['"]react['"]/i, /require\s*\(\s*['"]react['"]\)/i],
+  'Angular': [/from\s+['"]@angular\//i, /import\s+.*['"]@angular\//i, /angular\.json/],
+  'Next.js': [/from\s+['"]next\//i, /import\s+.*['"]next\//i, /next\.config/],
+  'Vue': [/from\s+['"]vue['"]/i, /import\s+.*['"]vue['"]/i, /Vue\.component\(/i, /createApp\(/i, /defineComponent\(/i],
+  'Nuxt': [/from\s+['"]nuxt/i, /import\s+.*['"]nuxt/i, /nuxt\.config/],
+  'Svelte': [/from\s+['"]svelte/i, /import\s+.*['"]svelte/i, /\.svelte$/i],
+  'Vite': [/from\s+['"]vite['"]/i, /import\s+.*['"]vite['"]/i, /vite\.config/],
+  'FastAPI': [/from\s+fastapi/i, /import\s+fastapi/i, /FastAPI\(/],
+  'Flask': [/from\s+flask/i, /import\s+flask/i, /Flask\(/],
+  'Django': [/from\s+django/i, /import\s+django/i, /django\.conf/i],
+  'Express.js': [/require\s*\(\s*['"]express['"]\)/i, /from\s+['"]express['"]/i, /express\(\)/i],
+  'NestJS': [/from\s+['"]@nestjs\//i, /import\s+.*['"]@nestjs\//i, /NestFactory/i],
+  'Tailwind CSS': [/tailwind\.config/i, /@tailwind/i, /tailwindcss/i],
+  'Zustand': [/from\s+['"]zustand/i, /import\s+.*['"]zustand/i, /create\s*\(\s*\(/],
+  'Redux': [/from\s+['"]redux/i, /import\s+.*['"]redux/i, /from\s+['"]@reduxjs/i],
+  'Dexie': [/from\s+['"]dexie['"]/i, /import\s+.*['"]dexie['"]/i, /new\s+Dexie\(/i],
+  'Firebase': [/from\s+['"]firebase/i, /import\s+.*['"]firebase/i, /firebase.*\.initialize/i],
+  'WebSockets': [/socket\.io/i, /WebSocket\(/i, /from\s+['"]ws['"]/i],
+};
+
 export const detectTechStackSignals = (file: ProjectFile) => {
   const code = file.content.toLowerCase();
   const path = file.path.toLowerCase();
@@ -145,32 +171,18 @@ export const detectTechStackSignals = (file: ProjectFile) => {
   const runtime = new Set<string>();
   const ui = new Set<string>();
 
-  if (code.includes('react')) stack.add('React');
-  if (code.includes('@angular/') || code.includes('angular.json') || code.includes('@component(')) stack.add('Angular');
-  if (code.includes('next/') || code.includes('next.config')) stack.add('Next.js');
-  if (code.includes('vue')) stack.add('Vue');
-  if (code.includes('nuxt')) stack.add('Nuxt');
-  if (code.includes('svelte')) stack.add('Svelte');
-  if (code.includes('vite')) stack.add('Vite');
-  if (code.includes('fastapi')) stack.add('FastAPI');
-  if (code.includes('flask')) stack.add('Flask');
-  if (code.includes('django')) stack.add('Django');
-  if (code.includes('express')) stack.add('Express.js');
-  if (code.includes('@nestjs/') || code.includes('nestfactory')) stack.add('NestJS');
-  if (code.includes('tailwind')) stack.add('Tailwind CSS');
-  if (ext === '.scss' || ext === '.sass' || code.includes('@mixin') || code.includes('$')) stack.add('SCSS/Sass');
+  for (const [tech, patterns] of Object.entries(IMPORT_PATTERNS)) {
+    if (detectByImport(code, patterns)) stack.add(tech);
+  }
+
+  if (ext === '.scss' || ext === '.sass' || code.includes('@mixin')) stack.add('SCSS/Sass');
   if (ext === '.css') stack.add('CSS');
   if (ext === '.html') stack.add('HTML');
-  if (ext === '.ts' || ext === '.tsx' || code.includes('typescript')) stack.add('TypeScript');
+  if (ext === '.ts' || ext === '.tsx') stack.add('TypeScript');
   if (ext === '.js' || ext === '.jsx') stack.add('JavaScript');
   if (ext === '.py') stack.add('Python');
-  if (ext === '.cs' || code.includes('using system') || code.includes('<project sdk=')) stack.add('C#');
-  if (ext === '.cs' || code.includes('asp.net') || code.includes('microsoft.aspnetcore')) stack.add('.NET / ASP.NET');
-  if (code.includes('zustand')) stack.add('Zustand');
-  if (code.includes('redux')) stack.add('Redux');
-  if (code.includes('dexie')) stack.add('Dexie');
-  if (code.includes('firebase')) stack.add('Firebase');
-  if (code.includes('socket.io') || code.includes('websocket')) stack.add('WebSockets');
+  if (ext === '.cs' || code.includes('<project sdk=')) stack.add('C#');
+  if (ext === '.cs' || code.includes('microsoft.aspnetcore')) stack.add('.NET / ASP.NET');
   if (code.includes('vite-plugin-pwa') || code.includes('manifest')) stack.add('PWA');
 
   if (code.includes('prisma')) databases.add('Prisma');
@@ -183,12 +195,12 @@ export const detectTechStackSignals = (file: ProjectFile) => {
   if (code.includes('mysql')) databases.add('MySQL');
   if (code.includes('sqlserver') || code.includes('entityframework')) databases.add('SQL Server');
 
-  if (code.includes('fastapi') || code.includes('flask') || code.includes('django')) runtime.add('Backend Python');
-  if (code.includes('express') || code.includes('@nestjs/')) runtime.add('Backend Node');
+  if (detectByImport(code, IMPORT_PATTERNS['FastAPI']) || detectByImport(code, IMPORT_PATTERNS['Flask']) || detectByImport(code, IMPORT_PATTERNS['Django'])) runtime.add('Backend Python');
+  if (detectByImport(code, IMPORT_PATTERNS['Express.js']) || detectByImport(code, IMPORT_PATTERNS['NestJS'])) runtime.add('Backend Node');
   if (ext === '.cs' || code.includes('microsoft.aspnetcore')) runtime.add('Backend .NET');
   if (code.includes('worker') || path.includes('worker')) runtime.add('Background Worker');
 
-  if (['.tsx', '.jsx', '.vue', '.svelte'].includes(ext) || code.includes('@angular/')) ui.add('SPA Frontend');
+  if (['.tsx', '.jsx', '.vue', '.svelte'].includes(ext) || detectByImport(code, IMPORT_PATTERNS['Angular'])) ui.add('SPA Frontend');
   if (ext === '.html' || ext === '.css' || ext === '.scss' || ext === '.sass') ui.add('Web UI');
 
   return {
@@ -420,12 +432,21 @@ export const extractProjectInsights = (projectData: ProjectData, projectName: st
   const topHotspots = [...projectData.nodes]
     .sort((a, b) => (b.data.importance || 0) - (a.data.importance || 0))
     .slice(0, 10)
-    .map((node) => ({
-      label: node.label,
-      path: node.id,
-      importance: node.data.importance || 0,
-      ext: node.group
-    }));
+    .map((node) => {
+      const semantic = summarizeFileSemantics(node.data);
+      return {
+        label: node.label,
+        path: node.id,
+        importance: node.data.importance || 0,
+        ext: node.group,
+        role: semantic.role,
+        confidence: semantic.confidence,
+        evidence: semantic.evidence,
+        complexity: semantic.complexity,
+        lines: semantic.nonEmptyLines || semantic.lines,
+        exports: semantic.exports
+      };
+    });
 
   const graphLeaders = [...projectData.nodes]
     .map((node) => {
@@ -500,6 +521,9 @@ export const buildExecutiveContext = (insights: ProjectInsights, filesCount: num
 export const buildSystemView = (insights: ProjectInsights, aiReview?: string | null) => {
   const highlights = extractAIHighlightsForIntent(aiReview || null, 'architecture', 4);
   let text = `# System View: ${insights.projectName}\n\n`;
+  text += `## Lectura de Confianza\n`;
+  text += `- Hechos verificables: capas listadas desde rutas reales y relaciones extraídas del grafo.\n`;
+  text += `- Heurísticas: roles inferidos y lecturas semánticas cortas para acelerar onboarding.\n\n`;
   text += `## Capas Detectadas\n`;
   insights.layerEntries.forEach((entry) => {
     text += `- [${entry.layer}]: ${entry.files.join(', ')}${entry.count >= 12 ? '...' : ''}\n`;
@@ -531,6 +555,11 @@ export const buildHotspotReport = (insights: ProjectInsights, aiReview?: string 
     text += `   Path: ${withProjectRoot(insights.projectName, item.path)}\n`;
     text += `   Importancia: ${item.importance}\n`;
     text += `   Tipo: ${item.ext}\n`;
+    text += `   Rol: ${item.role}\n`;
+    text += `   Complejidad estimada: ${item.complexity}\n`;
+    text += `   Lineas no vacias: ${item.lines}\n`;
+    text += `   Confianza: ${item.confidence} (${item.evidence})\n`;
+    text += `   Contratos detectados: ${getTopItems(item.exports, 5)}\n`;
   });
   text += `\n## Recomendaciones de Acción\n`;
   text += `- Revisa primero los archivos con más conexiones entrantes: suelen ser utilidades compartidas o núcleos frágiles.\n`;
@@ -755,39 +784,66 @@ export const buildTaskPackData = (projectData: ProjectData, insights: ProjectIns
 export const buildTaskPack = (projectData: ProjectData, insights: ProjectInsights, task: string, aiReview?: string | null) => {
   const data = buildTaskPackData(projectData, insights, task);
   const highlights = extractAIHighlightsForIntent(aiReview || null, 'handoff', 4);
+  const baseTerms = tokenizeTask(task.trim() || 'Analiza la tarea solicitada y ubica los archivos relevantes.');
+
+  const primaryPaths = new Set(data.primaryFiles.map(f => f.path));
+  const relatedPaths = new Set(data.relatedFiles.map(f => f.path));
+  const irrelevantFiles = projectData.files
+    .filter(f => {
+      const fullPath = `${data.projectName}/${f.path}`;
+      return !primaryPaths.has(fullPath) && !relatedPaths.has(fullPath) && !insights.entryPoints.includes(f.path);
+    })
+    .sort((a, b) => (a.importance || 0) - (b.importance || 0))
+    .slice(0, 10)
+    .map(f => f.path);
+
+  const tokenEstimate = Math.round(
+    (data.primaryFiles.length * 40) + (data.relatedFiles.length * 20) + 150
+  );
+
   let text = `# Agent Task Pack: ${data.projectName}\n\n`;
-  text += `## Tarea Solicitada\n`;
-  text += `${data.task}\n\n`;
-  text += `## Qué Hace el Proyecto\n`;
-  text += `- Resumen: ${data.projectSummary}\n`;
-  text += `- Stack: ${getTopItems(data.stack, 8)}\n`;
-  text += `- Entry points: ${getTopItems(data.entryPoints, 6)}\n\n`;
-  text += `## Archivos Primarios a Revisar\n`;
+  text += `## Tarea\n${data.task}\n\n`;
+  text += `## Contexto Rápido\n`;
+  text += `- Stack: ${getTopItems(data.stack, 6)}\n`;
+  text += `- Entry points: ${getTopItems(data.entryPoints, 4)}\n`;
+  text += `- ~${tokenEstimate} tokens estimados\n\n`;
+
+  text += `## Archivos Primarios\n`;
   data.primaryFiles.forEach((file) => {
-    text += `- \`${file.path}\` (impacto: ${file.importance}, score: ${file.score})\n`;
-    file.reasons.forEach((reason) => {
-      text += `  - ${reason}\n`;
-    });
+    text += `- \`${file.path}\`\n`;
+    if (file.reasons.length) text += `  ${file.reasons[0]}\n`;
   });
+
   text += `\n## Archivos Relacionados\n`;
-  if (!data.relatedFiles.length) {
-    text += `- No se detectaron relacionados claros en el subgrafo inicial.\n`;
-  } else {
+  if (data.relatedFiles.length) {
     data.relatedFiles.forEach((file) => {
       text += `- \`${file.path}\`\n`;
-      file.reasons.forEach((reason) => {
-        text += `  - ${reason}\n`;
-      });
     });
+  } else {
+    text += `- Ninguno detectado\n`;
   }
-  text += `\n## Orden de Lectura Recomendado\n`;
+
+  text += `\n## NO Tocar\n`;
+  if (irrelevantFiles.length) {
+    text += `- ${irrelevantFiles.join(', ')}\n`;
+    text += `- Cualquier archivo no listado arriba es probablemente irrelevante para esta tarea\n`;
+  } else {
+    text += `- Todos los archivos parecen potencialmente relevantes\n`;
+  }
+
+  text += `\n## Orden\n`;
   data.readingOrder.forEach((path, index) => {
     text += `${index + 1}. \`${path}\`\n`;
   });
-  text += `\n## Instrucciones para el Agente\n`;
-  data.implementationFocus.forEach((item, index) => {
-    text += `${index + 1}. ${item}\n`;
-  });
+
+  text += `\n## Instrucciones\n`;
+  text += `1. Lee los archivos primarios primero\n`;
+  text += `2. Solo abre relacionados si necesitas dependencias\n`;
+  text += `3. No modifiques archivos fuera de esta lista sin verificar impacto\n`;
+  if (baseTerms.length) {
+    text += `4. Términos guía: ${baseTerms.join(', ')}\n`;
+  }
+
   text += buildAIEnhancementBlock(
     highlights,
     'AI Handoff Notes',
@@ -796,9 +852,13 @@ export const buildTaskPack = (projectData: ProjectData, insights: ProjectInsight
   return text;
 };
 
-export const buildErrorContextPackData = (projectData: ProjectData, insights: ProjectInsights, rawErrorInput: string): ErrorContextPackData => {
+export const buildErrorContextPackData = (projectData: ProjectData, insights: ProjectInsights, rawErrorInput: string): ErrorContextPackData | null => {
+  if (!rawErrorInput.trim()) {
+    return null;
+  }
+
   const rootPath = (path: string) => withProjectRoot(insights.projectName, path);
-  const rawError = rawErrorInput.trim() || 'Error no especificado. Pega aquí el mensaje o stack trace para generar contexto.';
+  const rawError = rawErrorInput.trim();
   const errorHeadline = rawError
     .split('\n')
     .map((line) => line.trim())
@@ -998,6 +1058,7 @@ export const buildErrorContextPackData = (projectData: ProjectData, insights: Pr
 
 export const buildErrorContextPack = (projectData: ProjectData, insights: ProjectInsights, rawError: string) => {
   const data = buildErrorContextPackData(projectData, insights, rawError);
+  if (!data) return '';
   let text = `# Error-to-Context Pack: ${data.projectName}\n\n`;
   text += `## Error Capturado\n`;
   text += `${data.errorHeadline}\n\n`;

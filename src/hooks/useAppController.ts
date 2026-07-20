@@ -1,10 +1,23 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { APP_CONFIG } from '../config/appConfig';
+import { CONTEXT_WORKBENCH_DEFAULTS, SNAPSHOT_EXPORT_CONFIG } from '../config/projectContext';
 import { calculateAAMetrics } from '../utils/analysis';
 import { useProjectStore } from '../store/useProjectStore';
 
+const buildApiUrl = (path: string) => `${APP_CONFIG.apiBaseUrl}${path}`;
+
+const buildContentFingerprint = (content: string) => {
+  let hash = 2166136261;
+  for (let index = 0; index < content.length; index += 1) {
+    hash ^= content.charCodeAt(index);
+    hash = Math.imul(hash, 16777619);
+  }
+  return (hash >>> 0).toString(16);
+};
+
 export function useAppController() {
   const {
-    projectData, skippedCount, selectedNode, smartDiffData, projectMemory, isProcessing, isReviewing,
+    projectData, skippedCount, selectedNode, smartDiffData, projectMemory, isProcessing, processingProgress, isReviewing,
     searchQuery, treeSearch, activeTab, isFocusMode, aiReview, aiError,
     showFileModal, showIAModal,
     setProjectData, setSelectedNode, setSearchQuery, setTreeSearch,
@@ -22,14 +35,15 @@ export function useAppController() {
   const [isDesktopLayout, setIsDesktopLayout] = useState(false);
   const [showMobilePanel, setShowMobilePanel] = useState(false);
   const [graphDensityMode, setGraphDensityMode] = useState<'auto' | 'focused' | 'expanded'>('auto');
-  const [agentTask, setAgentTask] = useState('Ajusta el perfil del usuario y encuentra los archivos que debo modificar.');
-  const [errorTraceInput, setErrorTraceInput] = useState('TypeError: Cannot read properties of undefined (reading \'map\')\n    at src/components/GraphCanvas.tsx:128:18\n    at src/App.tsx:512:7');
-  const [semanticQuery, setSemanticQuery] = useState('dónde vive autenticación');
+  const [agentTask, setAgentTask] = useState(CONTEXT_WORKBENCH_DEFAULTS.agentTask);
+  const [errorTraceInput, setErrorTraceInput] = useState(CONTEXT_WORKBENCH_DEFAULTS.errorTraceInput);
+  const [semanticQuery, setSemanticQuery] = useState(CONTEXT_WORKBENCH_DEFAULTS.semanticQuery);
   const [exportSection, setExportSection] = useState<'guided' | 'task' | 'errors' | 'ai' | 'exports'>('guided');
   const [isSavingAIDocs, setIsSavingAIDocs] = useState(false);
   const [aiDocsSaveStatus, setAIDocsSaveStatus] = useState<string | null>(null);
   const lastAutoSavedReviewRef = useRef<string | null>(null);
   const lastAutoSavedContextRef = useRef<string | null>(null);
+  const downloadedArtifactsRef = useRef<Map<string, string>>(new Map());
 
   useEffect(() => {
     loadLastProject();
@@ -105,18 +119,12 @@ export function useAppController() {
     if (!aiReview) return [];
 
     return [
-      { filename: `${projectName}_vision_ai.md`, content: generateAIVisionDocument() },
-      { filename: `${projectName}_architecture_narrative_ai.md`, content: generateAIArchitectureNarrative() },
-      { filename: `${projectName}_refactor_priorities_ai.md`, content: generateAIRefactorPriorities() },
-      { filename: `${projectName}_agent_handoff_ai.md`, content: generateAIAgentHandoff(agentTask) }
+      { filename: `${projectName}_${SNAPSHOT_EXPORT_CONFIG.aiExportName}`, content: generateAIAgentHandoff(agentTask) }
     ].filter((file) => file.content.trim().length > 0);
   }, [
     aiReview,
     projectName,
     agentTask,
-    generateAIVisionDocument,
-    generateAIArchitectureNarrative,
-    generateAIRefactorPriorities,
     generateAIAgentHandoff
   ]);
 
@@ -124,21 +132,11 @@ export function useAppController() {
     if (!projectData || !projectName) return [];
 
     return [
-      { filename: `${projectName}_snapshot.md`, content: generateAIContext() },
-      { filename: `${projectName}_brief.md`, content: generateProjectBrief() },
-      { filename: `${projectName}_project_summary.json`, content: generateProjectMetadata() },
-      { filename: `${projectName}_graph_guide.md`, content: generateGraphGuide() },
-      { filename: `${projectName}_critical_flows.md`, content: generateCriticalFlows() },
-      { filename: `${projectName}_architecture_map.json`, content: JSON.stringify(projectData, null, 2) }
+      { filename: `${projectName}_${SNAPSHOT_EXPORT_CONFIG.deterministicExportName}`, content: generateAIContext() }
     ].filter((file) => file.content.trim().length > 0);
   }, [
-    projectData,
     projectName,
     generateAIContext,
-    generateProjectBrief,
-    generateProjectMetadata,
-    generateGraphGuide,
-    generateCriticalFlows
   ]);
 
   const saveFilesToContext = useCallback(async (files: { filename: string; content: string }[], mode: 'auto' | 'manual' = 'manual') => {
@@ -150,7 +148,7 @@ export function useAppController() {
     }
 
     try {
-      const response = await fetch('/api/context/export', {
+      const response = await fetch(buildApiUrl('/api/context/export'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ projectName, files })
@@ -158,14 +156,14 @@ export function useAppController() {
 
       const payload = await response.json();
       if (!response.ok) {
-        throw new Error(payload.detail || payload.error || 'No se pudieron guardar los documentos IA en contexto/');
+        throw new Error(payload.detail || payload.error || 'No se pudieron guardar los exportes en contexto/');
       }
 
-      const targetDirectory = payload.relative_directory || 'contexto/';
+      const targetDirectory = payload.relative_directory || `${APP_CONFIG.contextDirectoryLabel}/`;
       setAIDocsSaveStatus(`Guardados en ${targetDirectory}: ${payload.saved.join(', ')}`);
     } catch (error: any) {
-      console.error('Error saving AI docs to contexto:', error);
-      setAIDocsSaveStatus(error.message || 'No se pudieron guardar los documentos IA en contexto/');
+      console.error('Error saving context exports:', error);
+      setAIDocsSaveStatus(error.message || `No se pudieron guardar los exportes en ${APP_CONFIG.contextDirectoryLabel}/`);
     } finally {
       setIsSavingAIDocs(false);
     }
@@ -219,6 +217,19 @@ export function useAppController() {
   ]);
 
   const handleDownloadFile = useCallback((content: string, filename: string, type: string) => {
+    const fingerprint = buildContentFingerprint(content);
+    const previousFingerprint = downloadedArtifactsRef.current.get(filename);
+
+    if (previousFingerprint === fingerprint) {
+      const shouldRedownload = window.confirm(
+        `Ya descargaste "${filename}" en esta sesión y el contenido no cambió.\n\n¿Quieres descargarlo otra vez?`
+      );
+
+      if (!shouldRedownload) {
+        return;
+      }
+    }
+
     const blob = new Blob([content], { type });
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
@@ -228,6 +239,7 @@ export function useAppController() {
     link.click();
     document.body.removeChild(link);
     URL.revokeObjectURL(url);
+    downloadedArtifactsRef.current.set(filename, fingerprint);
   }, []);
 
   const openPanelTab = useCallback((tab: 'details' | 'context' | 'files' | 'ia' | 'settings') => {
@@ -300,6 +312,7 @@ export function useAppController() {
     smartDiffData,
     projectMemory,
     isProcessing,
+    processingProgress,
     isReviewing,
     searchQuery,
     treeSearch,
