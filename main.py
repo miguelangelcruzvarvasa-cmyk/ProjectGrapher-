@@ -238,6 +238,7 @@ class ContextExportFile(BaseModel):
 
 class ContextExportRequest(BaseModel):
     projectName: Optional[str] = Field(default=None, description="Nombre del proyecto analizado")
+    workspacePath: Optional[str] = Field(default=None, description="Ruta absoluta opcional del espacio de trabajo")
     files: List[ContextExportFile]
 
 
@@ -402,6 +403,15 @@ async def export_context_files(request: ContextExportRequest):
     project_context_dir.mkdir(parents=True, exist_ok=True)
     saved_files: List[str] = []
 
+    # Optional local workspace target directory (.context/)
+    workspace_target_dir = None
+    if request.workspacePath and os.path.exists(request.workspacePath):
+        try:
+            workspace_target_dir = Path(request.workspacePath) / ".context"
+            workspace_target_dir.mkdir(parents=True, exist_ok=True)
+        except Exception as e:
+            logger.warning(f"No se pudo crear carpeta .context en workspacePath: {str(e)}")
+
     for file in request.files:
         safe_name = re.sub(r"[^a-zA-Z0-9._-]+", "_", os.path.basename(file.filename)).strip("._")
         if not safe_name:
@@ -411,9 +421,16 @@ async def export_context_files(request: ContextExportRequest):
         target.write_text(file.content, encoding="utf-8")
         saved_files.append(str(target.name))
 
+        if workspace_target_dir:
+            try:
+                (workspace_target_dir / safe_name).write_text(file.content, encoding="utf-8")
+            except Exception as e:
+                logger.warning(f"Error escribiendo {safe_name} en workspace: {str(e)}")
+
     return {
         "saved": saved_files,
         "directory": str(project_context_dir),
+        "workspace_directory": str(workspace_target_dir) if workspace_target_dir else None,
         "relative_directory": f"{APP_SETTINGS['context_directory_name']}/{project_segment}"
     }
 
