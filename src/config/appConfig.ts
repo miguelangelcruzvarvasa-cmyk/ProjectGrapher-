@@ -13,7 +13,7 @@ export const APP_CONFIG = {
   frontendPort: parseNumber(ENV.VITE_FRONTEND_PORT, 3000),
   backendPort: parseNumber(ENV.PORT, 8080),
   backendHost: ENV.VITE_API_HOST || 'localhost',
-  apiBaseUrl: ENV.VITE_API_URL || (isDev ? '' : `http://${ENV.VITE_API_HOST || 'localhost'}:${parseNumber(ENV.PORT, 8080)}`),
+  apiBaseUrl: ENV.VITE_API_URL || '',
   customProviderUrlPlaceholder: ENV.VITE_CUSTOM_PROVIDER_URL_PLACEHOLDER || 'https://api.your-provider.com/v1',
   providerKeyPlaceholder: ENV.VITE_PROVIDER_KEY_PLACEHOLDER || 'sk-...'
 } as const;
