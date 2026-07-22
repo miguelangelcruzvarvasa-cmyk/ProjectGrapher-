@@ -6,7 +6,7 @@ import { VitePWA } from 'vite-plugin-pwa';
 
 export default defineConfig(({mode}) => {
   const env = loadEnv(mode, '.', '');
-  const backendHost = env.VITE_API_HOST || 'localhost';
+  const backendHost = env.VITE_API_HOST || '127.0.0.1';
   const backendPort = env.PORT || '8080';
   const frontendPort = Number(env.VITE_FRONTEND_PORT || '3000');
   const apiTarget = env.VITE_API_URL || `http://${backendHost}:${backendPort}`;

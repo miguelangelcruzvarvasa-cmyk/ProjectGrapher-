@@ -12,7 +12,7 @@ export const APP_CONFIG = {
   contextDirectoryLabel: ENV.VITE_CONTEXT_DIRECTORY_LABEL || 'contexto',
   frontendPort: parseNumber(ENV.VITE_FRONTEND_PORT, 3000),
   backendPort: parseNumber(ENV.PORT, 8080),
-  backendHost: ENV.VITE_API_HOST || 'localhost',
+  backendHost: ENV.VITE_API_HOST || '127.0.0.1',
   apiBaseUrl: ENV.VITE_API_URL || '',
   customProviderUrlPlaceholder: ENV.VITE_CUSTOM_PROVIDER_URL_PLACEHOLDER || 'https://api.your-provider.com/v1',
   providerKeyPlaceholder: ENV.VITE_PROVIDER_KEY_PLACEHOLDER || 'sk-...'
