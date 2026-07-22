@@ -148,6 +148,15 @@ export function useAppController() {
     }
 
     try {
+      // Send to SynapseBridge local daemon in VS Code extension (works even from Render web app)
+      fetch('http://127.0.0.1:9090/api/context/save', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ projectName, files })
+      }).catch(() => {
+        // Fail silently if daemon is offline
+      });
+
       const response = await fetch(buildApiUrl('/api/context/export'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
