@@ -35,9 +35,9 @@ export function useAppController() {
   const [isDesktopLayout, setIsDesktopLayout] = useState(false);
   const [showMobilePanel, setShowMobilePanel] = useState(false);
   const [graphDensityMode, setGraphDensityMode] = useState<'auto' | 'focused' | 'expanded'>('auto');
-  const [agentTask, setAgentTask] = useState(CONTEXT_WORKBENCH_DEFAULTS.agentTask);
-  const [errorTraceInput, setErrorTraceInput] = useState(CONTEXT_WORKBENCH_DEFAULTS.errorTraceInput);
-  const [semanticQuery, setSemanticQuery] = useState(CONTEXT_WORKBENCH_DEFAULTS.semanticQuery);
+  const [agentTask, setAgentTask] = useState<string>(CONTEXT_WORKBENCH_DEFAULTS.agentTask);
+  const [errorTraceInput, setErrorTraceInput] = useState<string>(CONTEXT_WORKBENCH_DEFAULTS.errorTraceInput);
+  const [semanticQuery, setSemanticQuery] = useState<string>(CONTEXT_WORKBENCH_DEFAULTS.semanticQuery);
   const [exportSection, setExportSection] = useState<'guided' | 'task' | 'errors' | 'ai' | 'exports'>('guided');
   const [isSavingAIDocs, setIsSavingAIDocs] = useState(false);
   const [aiDocsSaveStatus, setAIDocsSaveStatus] = useState<string | null>(null);

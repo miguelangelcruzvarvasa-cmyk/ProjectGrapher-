@@ -29,12 +29,8 @@ const TASK_TERM_ALIASES: Record<string, string[]> = {
   perfil: ['profile', 'profiles', 'account', 'cuenta', 'usuario', 'user', 'users'],
   usuario: ['user', 'users', 'account', 'cuenta', 'perfil', 'profile', 'auth', 'session', 'sesion'],
   auth: ['login', 'signin', 'signup', 'session', 'sesion', 'usuario', 'user', 'cuenta', 'account'],
-  alumno: ['student', 'students', 'estudiante', 'estudiantes', 'usuario', 'user'],
-  estudiante: ['student', 'students', 'alumno', 'alumnos', 'usuario', 'user'],
-  asesor: ['advisor', 'teacher', 'coach', 'mentor'],
   admin: ['administrador', 'dashboard', 'panel', 'management'],
-  pago: ['payment', 'payments', 'billing', 'checkout'],
-  curso: ['course', 'courses', 'clase', 'clases', 'lesson'],
+  pago: ['payment', 'payments', 'billing', 'checkout', 'invoice', 'charge'],
   configuracion: ['config', 'settings', 'preferences'],
   ajuste: ['update', 'edit', 'modify', 'patch', 'change'],
   error: ['bug', 'issue', 'fail', 'failure', 'crash'],
@@ -142,29 +138,32 @@ const detectByImport = (code: string, patterns: RegExp[]): boolean =>
 
 const IMPORT_PATTERNS: Record<string, RegExp[]> = {
   'React': [/\bfrom\s+['"]react['"]/i, /import\s+.*['"]react['"]/i, /require\s*\(\s*['"]react['"]\)/i],
-  'Angular': [/from\s+['"]@angular\//i, /import\s+.*['"]@angular\//i, /angular\.json/],
-  'Next.js': [/from\s+['"]next\//i, /import\s+.*['"]next\//i, /next\.config/],
-  'Vue': [/from\s+['"]vue['"]/i, /import\s+.*['"]vue['"]/i, /Vue\.component\(/i, /createApp\(/i, /defineComponent\(/i],
-  'Nuxt': [/from\s+['"]nuxt/i, /import\s+.*['"]nuxt/i, /nuxt\.config/],
-  'Svelte': [/from\s+['"]svelte/i, /import\s+.*['"]svelte/i, /\.svelte$/i],
-  'Vite': [/from\s+['"]vite['"]/i, /import\s+.*['"]vite['"]/i, /vite\.config/],
-  'FastAPI': [/from\s+fastapi/i, /import\s+fastapi/i, /FastAPI\(/],
-  'Flask': [/from\s+flask/i, /import\s+flask/i, /Flask\(/],
-  'Django': [/from\s+django/i, /import\s+django/i, /django\.conf/i],
-  'Express.js': [/require\s*\(\s*['"]express['"]\)/i, /from\s+['"]express['"]/i, /express\(\)/i],
-  'NestJS': [/from\s+['"]@nestjs\//i, /import\s+.*['"]@nestjs\//i, /NestFactory/i],
-  'Tailwind CSS': [/tailwind\.config/i, /@tailwind/i, /tailwindcss/i],
-  'Zustand': [/from\s+['"]zustand/i, /import\s+.*['"]zustand/i, /create\s*\(\s*\(/],
-  'Redux': [/from\s+['"]redux/i, /import\s+.*['"]redux/i, /from\s+['"]@reduxjs/i],
-  'Dexie': [/from\s+['"]dexie['"]/i, /import\s+.*['"]dexie['"]/i, /new\s+Dexie\(/i],
-  'Firebase': [/from\s+['"]firebase/i, /import\s+.*['"]firebase/i, /firebase.*\.initialize/i],
-  'WebSockets': [/socket\.io/i, /WebSocket\(/i, /from\s+['"]ws['"]/i],
-  'Flutter': [/package:flutter/i, /import\s+['"]package:flutter/i],
-  'Dart': [/import\s+['"]package:[a-zA-Z0-9_]+/i, /import\s+['"]dart:/i],
+  'Angular': [/from\s+['"]@angular\//i, /import\s+.*['"]@angular\//i],
+  'Next.js': [/from\s+['"]next\//i, /import\s+.*['"]next\//i],
+  'Vue': [/from\s+['"]vue['"]/i, /import\s+.*['"]vue['"]/i, /\bVue\.component\(/i, /\bcreateApp\(/i, /\bdefineComponent\(/i],
+  'Nuxt': [/from\s+['"]nuxt['"]/i, /import\s+.*['"]nuxt['"]/i],
+  'Svelte': [/from\s+['"]svelte['"]/i, /import\s+.*['"]svelte['"]/i],
+  'Vite': [/from\s+['"]vite['"]/i, /import\s+.*['"]vite['"]/i],
+  'FastAPI': [/from\s+fastapi\b/i, /import\s+fastapi\b/i, /\bFastAPI\(/],
+  'Flask': [/from\s+flask\b/i, /import\s+flask\b/i, /\bFlask\(/],
+  'Django': [/from\s+django\b/i, /import\s+django\b/i],
+  'Express.js': [/require\s*\(\s*['"]express['"]\)/i, /from\s+['"]express['"]/i, /\bexpress\(\)/i],
+  'NestJS': [/from\s+['"]@nestjs\//i, /import\s+.*['"]@nestjs\//i, /\bNestFactory\b/i],
+  'Tailwind CSS': [/from\s+['"]tailwindcss['"]/i, /@import\s+['"]tailwindcss['"]/i, /@tailwind\b/i],
+  'Zustand': [/from\s+['"]zustand['"]/i, /import\s+.*['"]zustand['"]/i],
+  'Redux': [/from\s+['"]redux['"]/i, /from\s+['"]@reduxjs\/toolkit['"]/i],
+  'Dexie': [/from\s+['"]dexie['"]/i, /import\s+.*['"]dexie['"]/i, /\bnew\s+Dexie\(/i],
+  'Firebase': [/from\s+['"]firebase\/(app|auth|firestore|database)['"]/i, /import\s+.*['"]firebase\/[a-z]+['"]/i],
+  'WebSockets': [/from\s+['"]socket\.io-client['"]/i, /from\s+['"]ws['"]/i, /\bnew\s+WebSocket\(/i],
+  'Flutter': [/import\s+['"]package:flutter\//i],
+  'Dart': [/import\s+['"]package:[a-zA-Z0-9_]+\//i, /import\s+['"]dart:/i],
+  'Laravel': [/use\s+Illuminate\\/i, /namespace\s+App\\/i, /laravel\/framework/i, /\bRoute::/i, /\bEloquent\b/i],
+  'PHP': [/<\?php/i, /namespace\s+[A-Za-z0-9_\\]+/i, /use\s+[A-Za-z0-9_\\]+/i],
 };
 
 export const detectTechStackSignals = (file: ProjectFile) => {
-  const code = file.content.toLowerCase();
+  const code = file.content;
+  const lowerCode = file.content.toLowerCase();
   const path = file.path.toLowerCase();
   const ext = file.ext.toLowerCase();
 
@@ -177,36 +176,66 @@ export const detectTechStackSignals = (file: ProjectFile) => {
     if (detectByImport(code, patterns)) stack.add(tech);
   }
 
-  if (ext === '.scss' || ext === '.sass' || code.includes('@mixin')) stack.add('SCSS/Sass');
+  // Path-based framework/config detectors
+  if (path.endsWith('vite.config.ts') || path.endsWith('vite.config.js')) stack.add('Vite');
+  if (path.endsWith('next.config.js') || path.endsWith('next.config.mjs') || path.endsWith('next.config.ts')) stack.add('Next.js');
+  if (path.endsWith('nuxt.config.ts') || path.endsWith('nuxt.config.js')) stack.add('Nuxt');
+  if (path.endsWith('angular.json')) stack.add('Angular');
+  if (path.endsWith('tailwind.config.js') || path.endsWith('tailwind.config.ts')) stack.add('Tailwind CSS');
+
+  if (ext === '.scss' || ext === '.sass' || (['.css', '.scss', '.sass'].includes(ext) && lowerCode.includes('@mixin'))) stack.add('SCSS/Sass');
   if (ext === '.css') stack.add('CSS');
   if (ext === '.html') stack.add('HTML');
   if (ext === '.ts' || ext === '.tsx') stack.add('TypeScript');
   if (ext === '.js' || ext === '.jsx') stack.add('JavaScript');
   if (ext === '.py') stack.add('Python');
-  if (ext === '.cs' || code.includes('<project sdk=')) stack.add('C#');
-  if (ext === '.cs' || code.includes('microsoft.aspnetcore')) stack.add('.NET / ASP.NET');
-  if (code.includes('vite-plugin-pwa') || code.includes('manifest')) stack.add('PWA');
+  if (ext === '.php' || path.endsWith('composer.json') || path.endsWith('artisan')) {
+    stack.add('PHP');
+    if (
+      lowerCode.includes('illuminate\\') ||
+      lowerCode.includes('laravel/framework') ||
+      path.includes('app/http') ||
+      path.includes('app/models') ||
+      path.includes('app/services') ||
+      path.endsWith('artisan') ||
+      path.endsWith('bootstrap/app.php')
+    ) {
+      stack.add('Laravel');
+      runtime.add('Backend PHP / Laravel');
+    }
+  }
+  if (ext === '.cs' || path.endsWith('.csproj') || path.endsWith('.sln')) {
+    stack.add('C#');
+    if (ext === '.cs' && (lowerCode.includes('using microsoft.aspnetcore') || lowerCode.includes('microsoft.aspnetcore.builder'))) {
+      stack.add('.NET / ASP.NET');
+      runtime.add('Backend .NET');
+    }
+  }
+  if (path.endsWith('manifest.json') || (/\bfrom\s+['"]vite-plugin-pwa['"]/i.test(code))) stack.add('PWA');
   if (ext === '.dart') {
     stack.add('Dart');
-    if (code.includes('flutter') || path.includes('lib/')) {
+    if (lowerCode.includes('package:flutter/') || path.includes('lib/')) {
       stack.add('Flutter');
     }
   }
 
-  if (code.includes('prisma')) databases.add('Prisma');
-  if (code.includes('mongoose')) databases.add('MongoDB/Mongoose');
-  if (code.includes('sequelize')) databases.add('Sequelize');
-  if (code.includes('typeorm')) databases.add('TypeORM');
-  if (code.includes('dexie') || code.includes('indexeddb')) databases.add('IndexedDB');
-  if (code.includes('sqlite')) databases.add('SQLite');
-  if (code.includes('postgres')) databases.add('PostgreSQL');
-  if (code.includes('mysql')) databases.add('MySQL');
-  if (code.includes('sqlserver') || code.includes('entityframework')) databases.add('SQL Server');
+  // Strict database detectors (imports or driver instantiation, not string literals in text)
+  if (/\bfrom\s+['"]@prisma\/client['"]/i.test(code) || path.endsWith('schema.prisma')) databases.add('Prisma');
+  if (/\bfrom\s+['"]mongoose['"]/i.test(code) || /\brequire\(['"]mongoose['"]\)/i.test(code)) databases.add('MongoDB/Mongoose');
+  if (/\bfrom\s+['"]sequelize['"]/i.test(code) || /\brequire\(['"]sequelize['"]\)/i.test(code)) databases.add('Sequelize');
+  if (/\bfrom\s+['"]typeorm['"]/i.test(code) || /\brequire\(['"]typeorm['"]\)/i.test(code)) databases.add('TypeORM');
+  if (/\bfrom\s+['"]dexie['"]/i.test(code) || /\brequire\(['"]dexie['"]\)/i.test(code) || /\bnew\s+Dexie\b/i.test(code)) databases.add('IndexedDB');
+  if (/\bwindow\.indexedDB\b|\bindexedDB\.open\b/i.test(code)) databases.add('IndexedDB');
+  if (/\bimport\s+sqlite3\b/i.test(code) || /\bfrom\s+['"]sqlite3['"]/i.test(code) || /\bfrom\s+['"]better-sqlite3['"]/i.test(code)) databases.add('SQLite');
+  if (/\bimport\s+psycopg2\b/i.test(code) || /\bfrom\s+['"]pg['"]/i.test(code) || lowerCode.includes('pgsql')) databases.add('PostgreSQL');
+  if (/\bimport\s+pymysql\b/i.test(code) || /\bfrom\s+['"]mysql2?['"]/i.test(code) || lowerCode.includes('pdo_mysql')) databases.add('MySQL');
+  if (/\bimport\s+pyodbc\b/i.test(code) || /\bfrom\s+['"]mssql['"]/i.test(code)) databases.add('SQL Server');
+  if (lowerCode.includes('illuminate\\database') || lowerCode.includes('eloquent')) databases.add('Eloquent ORM (Laravel)');
 
   if (detectByImport(code, IMPORT_PATTERNS['FastAPI']) || detectByImport(code, IMPORT_PATTERNS['Flask']) || detectByImport(code, IMPORT_PATTERNS['Django'])) runtime.add('Backend Python');
   if (detectByImport(code, IMPORT_PATTERNS['Express.js']) || detectByImport(code, IMPORT_PATTERNS['NestJS'])) runtime.add('Backend Node');
-  if (ext === '.cs' || code.includes('microsoft.aspnetcore')) runtime.add('Backend .NET');
-  if (code.includes('worker') || path.includes('worker')) runtime.add('Background Worker');
+  if (detectByImport(code, IMPORT_PATTERNS['Laravel']) || ext === '.php') runtime.add('Backend PHP / Laravel');
+  if (path.includes('worker') || /\bself\.onmessage\b|\bpostMessage\b/.test(code)) runtime.add('Background Worker');
 
   if (['.tsx', '.jsx', '.vue', '.svelte', '.dart'].includes(ext) || detectByImport(code, IMPORT_PATTERNS['Angular']) || stack.has('Flutter')) ui.add('SPA Frontend');
   if (ext === '.html' || ext === '.css' || ext === '.scss' || ext === '.sass') ui.add('Web UI');
@@ -508,16 +537,17 @@ export const buildExecutiveContext = (insights: ProjectInsights, filesCount: num
   text += `## Qué Hace\n`;
   text += `${insights.projectName} es un proyecto orientado a entregar contexto arquitectónico accionable para desarrolladores y agentes de programación.\n\n`;
   text += `## Resumen Rápido\n`;
-  text += `- Archivos analizados: ${filesCount}\n`;
-  text += `- Relaciones detectadas: ${linksCount}\n`;
-  text += `- Stack principal: ${getTopItems(insights.stack, 8)}\n`;
-  text += `- Entry points: ${getTopItems(insights.entryPoints, 8)}\n`;
-  text += `- Directorios principales: ${getTopItems(insights.directories, 10)}\n`;
-  text += `- Hotspots principales: ${insights.topHotspots.slice(0, 6).map((item) => `${item.label} [${item.importance}]`).join(', ') || 'N/A'}\n\n`;
-  text += `## Qué Debe Entender Otro Agente\n`;
-  text += `- Empieza por los entry points para entender el flujo base.\n`;
-  text += `- Revisa los hotspots porque suelen orquestar pantallas, estado o integración.\n`;
-  text += `- Sigue las relaciones principales para ubicar rápido dónde tocar cuando te pidan una funcionalidad.\n`;
+  text += `- **Archivos analizados**: ${filesCount}\n`;
+  text += `- **Relaciones detectadas**: ${linksCount}\n`;
+  text += `- **Stack principal**: ${getTopItems(insights.stack, 8)}\n`;
+  text += `- **Entry points**: ${getTopItems(insights.entryPoints, 8)}\n`;
+  text += `- **Directorios principales**: ${getTopItems(insights.directories, 10)}\n`;
+  text += `- **Hotspots principales**: ${insights.topHotspots.slice(0, 6).map((item) => `${item.label} [${item.importance}]`).join(', ') || 'N/A'}\n\n`;
+  text += `## Guía de Onboarding para Agentes\n\n`;
+  text += `> [!TIP]\n`;
+  text += `> 1. Empieza por los entry points para entender el flujo base.\n`;
+  text += `> 2. Revisa los hotspots porque suelen orquestar pantallas, estado o integración.\n`;
+  text += `> 3. Sigue las relaciones principales para ubicar rápido dónde tocar cuando te pidan una funcionalidad.\n\n`;
   text += buildAIEnhancementBlock(
     highlights,
     'Capa IA',
@@ -529,18 +559,17 @@ export const buildExecutiveContext = (insights: ProjectInsights, filesCount: num
 export const buildSystemView = (insights: ProjectInsights, aiReview?: string | null) => {
   const highlights = extractAIHighlightsForIntent(aiReview || null, 'architecture', 4);
   let text = `# System View: ${insights.projectName}\n\n`;
-  text += `## Lectura de Confianza\n`;
-  text += `- Hechos verificables: capas listadas desde rutas reales y relaciones extraídas del grafo.\n`;
-  text += `- Heurísticas: roles inferidos y lecturas semánticas cortas para acelerar onboarding.\n\n`;
+  text += `> [!NOTE]\n`;
+  text += `> Lectura de confianza: Hechos verificables (capas reales y grafo) cruzados con heurísticas de rol semántico.\n\n`;
   text += `## Capas Detectadas\n`;
   insights.layerEntries.forEach((entry) => {
-    text += `- [${entry.layer}]: ${entry.files.join(', ')}${entry.count >= 12 ? '...' : ''}\n`;
+    text += `- **[${entry.layer}]**: ${entry.files.join(', ')}${entry.count >= 12 ? '...' : ''}\n`;
   });
   text += `\n## Módulos Más Conectados\n`;
   insights.graphLeaders.slice(0, 10).forEach((leader) => {
-    text += `- ${leader.label}: ${leader.total} conexiones (${leader.outgoing} salientes, ${leader.incoming} entrantes)\n`;
-    text += `  Usa -> ${getTopItems(leader.outgoingTargets, 4)}\n`;
-    text += `  Es usado por -> ${getTopItems(leader.incomingSources, 4)}\n`;
+    text += `- **${leader.label}**: ${leader.total} conexiones (${leader.outgoing} salientes, ${leader.incoming} entrantes)\n`;
+    text += `  - *Usa*: ${getTopItems(leader.outgoingTargets, 4)}\n`;
+    text += `  - *Es usado por*: ${getTopItems(leader.incomingSources, 4)}\n`;
   });
   text += `\n## Flujos de Dependencia\n`;
   insights.topRelations.forEach((relation) => {
@@ -559,20 +588,17 @@ export const buildHotspotReport = (insights: ProjectInsights, aiReview?: string 
   let text = `# Hotspots & Deuda Técnica: ${insights.projectName}\n\n`;
   text += `## Hotspots Prioritarios\n`;
   insights.topHotspots.forEach((item, index) => {
-    text += `${index + 1}. ${item.label}\n`;
-    text += `   Path: ${withProjectRoot(insights.projectName, item.path)}\n`;
-    text += `   Importancia: ${item.importance}\n`;
-    text += `   Tipo: ${item.ext}\n`;
-    text += `   Rol: ${item.role}\n`;
-    text += `   Complejidad estimada: ${item.complexity}\n`;
-    text += `   Lineas no vacias: ${item.lines}\n`;
-    text += `   Confianza: ${item.confidence} (${item.evidence})\n`;
-    text += `   Contratos detectados: ${getTopItems(item.exports, 5)}\n`;
+    text += `${index + 1}. **${item.label}**\n`;
+    text += `   - Path: ${withProjectRoot(insights.projectName, item.path)}\n`;
+    text += `   - Importancia: ${item.importance} | Tipo: ${item.ext}\n`;
+    text += `   - Rol: ${item.role} (Complejidad: ${item.complexity}, ${item.lines} líneas)\n`;
+    text += `   - Contratos: ${getTopItems(item.exports, 5)}\n`;
   });
-  text += `\n## Recomendaciones de Acción\n`;
-  text += `- Revisa primero los archivos con más conexiones entrantes: suelen ser utilidades compartidas o núcleos frágiles.\n`;
-  text += `- Revisa luego los archivos con más conexiones salientes: suelen ser orquestadores o pantallas con demasiadas responsabilidades.\n`;
-  text += `- Antes de refactorizar, sigue las relaciones del grafo para evitar romper cadenas de dependencias ocultas.\n`;
+  text += `\n## Recomendaciones de Acción\n\n`;
+  text += `> [!IMPORTANT]\n`;
+  text += `> - Revisa primero los archivos con más conexiones entrantes: suelen ser utilidades compartidas o núcleos frágiles.\n`;
+  text += `> - Revisa luego los archivos con más conexiones salientes: suelen ser orquestadores o pantallas con demasiadas responsabilidades.\n`;
+  text += `> - Antes de refactorizar, sigue las relaciones del grafo para evitar romper cadenas de dependencias ocultas.\n\n`;
   text += buildAIEnhancementBlock(
     highlights,
     'Señales IA Sobre Riesgo',
@@ -861,12 +887,9 @@ export const buildTaskPack = (projectData: ProjectData, insights: ProjectInsight
 };
 
 export const buildErrorContextPackData = (projectData: ProjectData, insights: ProjectInsights, rawErrorInput: string): ErrorContextPackData | null => {
-  if (!rawErrorInput.trim()) {
-    return null;
-  }
-
+  const effectiveError = rawErrorInput.trim() || 'Sin error activo proporcionado. Este pack sirve como plantilla base de depuración.';
   const rootPath = (path: string) => withProjectRoot(insights.projectName, path);
-  const rawError = rawErrorInput.trim();
+  const rawError = effectiveError;
   const errorHeadline = rawError
     .split('\n')
     .map((line) => line.trim())

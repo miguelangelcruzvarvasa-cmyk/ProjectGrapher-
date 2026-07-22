@@ -191,7 +191,7 @@ export const createProjectSlice = (set: SetState, get: GetState) => ({
   projectMemory: {},
   isProcessing: false,
   processingProgress: {
-    stage: 'idle',
+    stage: 'idle' as const,
     message: '',
     current: 0,
     total: 0,

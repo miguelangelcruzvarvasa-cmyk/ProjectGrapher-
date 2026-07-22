@@ -165,6 +165,43 @@ class DeepAnalyzer:
                 matches = re.findall(r'use\s+([\w\:]+);', content)
                 deps.extend(matches)
 
+            elif ext in ['scss', 'sass', 'less', 'css']:
+                # SCSS / SASS / LESS / CSS
+                matches = re.findall(r'@(?:import|use|forward)\s+(?:url\()?[\'"](.+?)[\'"]\)?', content)
+                for m in matches:
+                    clean_m = m.split('/')[-1].replace('_', '')
+                    deps.append(clean_m)
+                    deps.append(m)
+
+            elif ext in ['vue', 'svelte', 'html']:
+                # Vue / Svelte / HTML
+                imports = re.findall(r'import\s+(?:.*?\s+from\s+)?[\'"](.+?)[\'"]', content)
+                deps.extend(imports)
+                styles = re.findall(r'@(?:import|use|forward)\s+[\'"](.+?)[\'"]', content)
+                deps.extend(styles)
+
+            elif ext in ['php']:
+                # PHP / Laravel / Blade
+                use_matches = re.findall(r'use\s+([\w\\]+)', content)
+                for u in use_matches:
+                    clean_u = u.replace('\\', '/').split('/')[-1]
+                    deps.append(clean_u)
+                    deps.append(u.replace('\\', '/'))
+                extends_matches = re.findall(r'extends\s+([\w\\]+)', content)
+                for e in extends_matches:
+                    clean_e = e.replace('\\', '/').split('/')[-1]
+                    deps.append(clean_e)
+                new_matches = re.findall(r'new\s+([\w\\]+)\s*\(', content)
+                for n in new_matches:
+                    clean_n = n.replace('\\', '/').split('/')[-1]
+                    deps.append(clean_n)
+                type_matches = re.findall(r'\b([A-Z]\w+)\s+\$\w+', content)
+                deps.extend(type_matches)
+                blade_matches = re.findall(r'@(?:include|extends|component|each)\([\'"](.+?)[\'"]', content)
+                for b in blade_matches:
+                    clean_b = b.replace('.', '/').split('/')[-1]
+                    deps.append(clean_b)
+
             # Limpiar y deduplicar
             return list(set([d.strip() for d in deps if d and len(d) > 1]))
         except Exception as e:
