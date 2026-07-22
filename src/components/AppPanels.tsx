@@ -1,5 +1,5 @@
 import React from 'react';
-import { AlertCircle, ChevronRight, Code2, Database, Loader2, Network, Upload } from 'lucide-react';
+import { AlertCircle, ChevronRight, Code2, Database, Loader2, Network, Sparkles, Upload } from 'lucide-react';
 import { motion } from 'motion/react';
 import Markdown from 'react-markdown';
 import { AIConfig } from './AIConfig';
