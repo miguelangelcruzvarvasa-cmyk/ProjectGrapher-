@@ -6,6 +6,7 @@ import { generateAIContextExport, generateCriticalFlowsExport, generateGraphGuid
 import { buildAIArchitectureNarrative, buildAIAgentHandoff, buildAIRefactorPriorities, buildAIVisionDocument, buildErrorContextPack, buildErrorContextPackData, buildExecutiveContext, buildHotspotReport, buildImpactAnalysisData, buildSemanticSearchResults, buildSmartDiffData, buildSystemView, buildTaskPack, buildTaskPackData, extractProjectInsights, formatProjectPaths } from './projectInsights';
 import { DEFAULT_AI_PROVIDER, getDefaultAiModel } from '../config/aiDefaults';
 import { APP_CONFIG } from '../config/appConfig';
+import { emitLiveNodeFocus } from './synapseBridgeConnector';
 
 type SetState = StoreApi<ProjectState>['setState'];
 type GetState = StoreApi<ProjectState>['getState'];
@@ -202,7 +203,15 @@ export const createProjectSlice = (set: SetState, get: GetState) => ({
   contextHistory: [],
   setProjectData: (data: ProjectState['projectData']) => set({ projectData: data }),
   setSkippedCount: (count: number) => set({ skippedCount: count }),
-  setSelectedNode: (node: ProjectState['selectedNode']) => set({ selectedNode: node }),
+  setSelectedNode: (node: ProjectState['selectedNode']) => {
+    set({ selectedNode: node });
+    if (node) {
+      const { projectData, projectName } = get();
+      if (projectData) {
+        emitLiveNodeFocus(node, projectData, projectName || APP_CONFIG.projectFallbackName);
+      }
+    }
+  },
   setProcessingProgress: (progress: ProjectState['processingProgress']) => set({ processingProgress: progress }),
   setProjectGlobalMemory: (note: string) => {
     const { projectName, projectMemory } = get();
