@@ -64,14 +64,18 @@ export function EmptyProjectState({
               </div>
               <div className="h-3 overflow-hidden rounded-full border border-white/8 bg-black/35">
                 <div
-                  className="h-full rounded-full bg-gradient-to-r from-brand-primary via-cyan-400 to-brand-secondary transition-all duration-300"
+                  className="h-full rounded-full bg-gradient-to-r from-brand-primary via-cyan-400 to-brand-secondary transition-all duration-200 ease-out"
                   style={{ width: `${progressPercent}%` }}
                 />
               </div>
+              <div className="flex items-center justify-between text-[10px] text-gray-500">
+                <span>{progressStageLabel}</span>
+                <span className="font-mono">{processingProgress.current.toLocaleString()} / {processingProgress.total.toLocaleString()}</span>
+              </div>
               {processingProgress.total > 0 && (
                 <div className="flex items-center justify-between gap-3 text-xs text-gray-400">
-                  <span>{processingProgress.current.toLocaleString()} de {processingProgress.total.toLocaleString()} elementos</span>
-                  <span>La pantalla se actualizara al terminar esta fase.</span>
+                  <span className="font-mono">{processingProgress.current.toLocaleString()} / {processingProgress.total.toLocaleString()} archivos</span>
+                  <span className="text-gray-500">{progressPercent}% completado</span>
                 </div>
               )}
             </div>

@@ -23,18 +23,19 @@ self.onmessage = async (e: MessageEvent<{ files: { path: string, file: File, siz
   const totalFiles = rawFiles.length;
 
   // 1. Filter and process content in batches asynchronously
-  const BATCH_SIZE = 100;
+  const BATCH_SIZE = 50;
+  const startTime = Date.now();
   for (let index = 0; index < rawFiles.length; index += BATCH_SIZE) {
-    const batch = rawFiles.slice(index, index + BATCH_SIZE);
-    
-    // Filter out invalid files first to avoid reading them
-    const validBatch = batch.filter(item => shouldProcessFile(item.path, item.size));
-    skippedCount += (batch.length - validBatch.length);
-
     if (validFiles.length >= 1500) {
       skippedCount += rawFiles.length - index;
       break;
     }
+
+    const batch = rawFiles.slice(index, index + BATCH_SIZE);
+
+    // Filter out invalid files first to avoid reading them
+    const validBatch = batch.filter(item => shouldProcessFile(item.path, item.size));
+    skippedCount += (batch.length - validBatch.length);
 
     // Read batch in parallel
     const readResults = await Promise.all(
@@ -65,13 +66,18 @@ self.onmessage = async (e: MessageEvent<{ files: { path: string, file: File, siz
       });
     }
 
+    const processed = Math.min(index + batch.length, totalFiles);
+    const elapsed = (Date.now() - startTime) / 1000;
+    const rate = processed / elapsed;
+    const remaining = rate > 0 ? Math.ceil((totalFiles - processed) / rate) : 0;
+
     self.postMessage({
       progress: {
         stage: 'graph',
-        message: 'Leyendo archivos y construyendo el grafo...',
-        current: Math.min(index + batch.length, totalFiles),
+        message: `Leyendo archivos... ${remaining > 0 ? `(~${remaining}s restantes)` : ''}`,
+        current: processed,
         total: totalFiles,
-        ratio: totalFiles ? Math.min(index + batch.length, totalFiles) / totalFiles : 0
+        ratio: totalFiles ? processed / totalFiles : 0
       }
     });
   }

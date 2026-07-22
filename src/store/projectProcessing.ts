@@ -2,7 +2,7 @@ import { GraphLink, GraphNode, ProjectData } from '../types';
 import { createProjectFileResolver, normalizeProjectPath, shouldProcessFile } from '../utils/analysis';
 
 const MAX_GRAPH_FILES = 1500;
-const SCAN_BATCH_SIZE = 2000;
+const SCAN_BATCH_SIZE = 500;
 
 // Escala visual de nodos según su "importancia" (cantidad de links entrantes/salientes)
 const NODE_MIN_SIZE = 12;
