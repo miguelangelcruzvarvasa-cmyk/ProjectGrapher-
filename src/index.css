@@ -154,3 +154,75 @@
 .react-flow__attribution {
   display: none !important;
 }
+
+/* ============================================
+   TRANSLATION PROTECTION - Blindaje Anti-Traductor
+   ============================================ */
+
+/* Prevencion global de traduccion */
+html[translate="no"],
+body.notranslate,
+[translate="no"] {
+  translate: no;
+}
+
+/* Nodos del grafo - NUNCA traducir */
+.react-flow__node,
+.react-flow__node label,
+.react-flow__node span,
+.react-flow__edge label {
+  translate: no;
+}
+
+/* Codigo y paths de archivos */
+code, pre, kbd, samp,
+.code-text,
+.file-path,
+.node-label,
+.config-key,
+.api-endpoint,
+.command-text,
+.tech-term {
+  translate: no;
+}
+
+/* Elementos con atributos de datos */
+[data-no-translate],
+[data-node-id],
+[data-file-path],
+[data-tooltip] {
+  translate: no;
+}
+
+/* Inputs y selects */
+input[type="text"],
+input[type="search"],
+input[type="number"],
+select {
+  translate: no;
+}
+
+/* Botones - preservar iconos y textos de accion */
+button {
+  translate: no;
+}
+
+/* Markdown renderizado */
+.markdown-content,
+.markdown-content code,
+.markdown-content pre {
+  translate: no;
+}
+
+/* JSON y datos estructurados */
+.json-viewer,
+.data-display {
+  translate: no;
+}
+
+/* Branding y branding */
+.logo,
+.brand-name,
+.app-title {
+  translate: no;
+}
