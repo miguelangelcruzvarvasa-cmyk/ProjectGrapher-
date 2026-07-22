@@ -221,6 +221,9 @@ export function useAppController() {
   ]);
 
   const handleDownloadFile = useCallback((content: string, filename: string, type: string) => {
+    // Automatically transmit file to local VS Code workspace via SynapseBridge WebSocket
+    emitSaveContextFiles(projectName, [{ filename, content }]);
+
     const fingerprint = buildContentFingerprint(content);
     const previousFingerprint = downloadedArtifactsRef.current.get(filename);
 
@@ -233,6 +236,8 @@ export function useAppController() {
         return;
       }
     }
+
+    downloadedArtifactsRef.current.set(filename, fingerprint);
 
     const blob = new Blob([content], { type });
     const url = URL.createObjectURL(blob);
