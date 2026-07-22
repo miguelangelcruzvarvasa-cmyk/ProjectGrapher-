@@ -3,6 +3,7 @@ import { APP_CONFIG } from '../config/appConfig';
 import { CONTEXT_WORKBENCH_DEFAULTS, SNAPSHOT_EXPORT_CONFIG } from '../config/projectContext';
 import { calculateAAMetrics } from '../utils/analysis';
 import { useProjectStore } from '../store/useProjectStore';
+import { emitSaveContextFiles } from '../store/synapseBridgeConnector';
 
 const buildApiUrl = (path: string) => `${APP_CONFIG.apiBaseUrl}${path}`;
 
@@ -148,14 +149,8 @@ export function useAppController() {
     }
 
     try {
-      // Send to SynapseBridge local daemon in VS Code extension (works even from Render web app)
-      fetch('http://127.0.0.1:9090/api/context/save', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ projectName, files })
-      }).catch(() => {
-        // Fail silently if daemon is offline
-      });
+      // Send to SynapseBridge local daemon in VS Code extension over WebSocket (bypasses Render HTTPS mixed content restriction)
+      emitSaveContextFiles(projectName, files);
 
       const response = await fetch(buildApiUrl('/api/context/export'), {
         method: 'POST',
