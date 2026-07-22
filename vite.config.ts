@@ -63,5 +63,19 @@ export default defineConfig(({mode}) => {
         }
       }
     },
+    build: {
+      chunkSizeWarningLimit: 600,
+      rollupOptions: {
+        output: {
+          manualChunks: {
+            'react-vendor': ['react', 'react-dom'],
+            'd3-vendor': ['d3'],
+            'ui-vendor': ['@xyflow/react', 'motion', 'lucide-react'],
+            'ai-vendor': ['openai', '@google/genai'],
+            'state-vendor': ['zustand', 'dexie'],
+          }
+        }
+      }
+    },
   };
 });

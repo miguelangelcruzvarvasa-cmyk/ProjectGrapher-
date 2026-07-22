@@ -7,6 +7,7 @@
     "dev": "vite --host=0.0.0.0",
     "build": "vite build",
     "preview": "vite preview",
+    "start": "npx serve dist -l $PORT",
     "server": "python main.py",
     "server:legacy": "node server/index.js",
     "clean": "powershell -NoProfile -Command \"if (Test-Path dist) { Remove-Item -Recurse -Force dist }\"",
