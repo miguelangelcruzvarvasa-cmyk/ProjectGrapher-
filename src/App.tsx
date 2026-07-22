@@ -137,8 +137,6 @@ export default function App() {
         isProcessing={isProcessing}
         processingProgress={processingProgress}
         onProcessFiles={processFiles}
-        showSettingsModal={showSettingsModal}
-        setShowSettingsModal={setShowSettingsModal}
       />
     );
   }

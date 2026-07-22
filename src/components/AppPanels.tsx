@@ -1,5 +1,5 @@
 import React from 'react';
-import { AlertCircle, ChevronRight, Code2, Database, Loader2, Network, Sparkles, Upload } from 'lucide-react';
+import { AlertCircle, ChevronRight, Code2, Database, Loader2, Network, Upload } from 'lucide-react';
 import { motion } from 'motion/react';
 import Markdown from 'react-markdown';
 import { AIConfig } from './AIConfig';
@@ -12,8 +12,6 @@ type EmptyProjectStateProps = {
   isProcessing: boolean;
   processingProgress: ProcessingProgress;
   onProcessFiles: (files: FileList) => void;
-  showSettingsModal: boolean;
-  setShowSettingsModal: (show: boolean) => void;
 };
 
 const PROCESSING_STAGE_LABELS: Record<ProcessingProgress['stage'], string> = {
@@ -29,9 +27,7 @@ export function EmptyProjectState({
   cn,
   isProcessing,
   processingProgress,
-  onProcessFiles,
-  showSettingsModal,
-  setShowSettingsModal
+  onProcessFiles
 }: EmptyProjectStateProps) {
   const progressPercent = Math.min(100, Math.max(6, Math.round((processingProgress.ratio || 0) * 100)));
   const progressStageLabel = PROCESSING_STAGE_LABELS[processingProgress.stage] || 'Procesando';
@@ -155,26 +151,7 @@ export function EmptyProjectState({
               )}
             </label>
           </div>
-
-          <button
-            onClick={() => setShowSettingsModal(true)}
-            className="flex items-center gap-2 text-gray-500 hover:text-white transition-colors text-sm font-medium"
-          >
-            <Sparkles className="w-4 h-4" /> Configurar Proveedor de IA
-          </button>
         </div>
-
-        <Modal isOpen={showSettingsModal} onClose={() => setShowSettingsModal(false)} title="Configuración de IA">
-          <div className="space-y-6">
-            <AIConfig />
-            <button
-              onClick={() => setShowSettingsModal(false)}
-              className="w-full py-4 bg-brand-primary text-white rounded-2xl font-bold hover:brightness-110 transition-all"
-            >
-              Guardar y Cerrar
-            </button>
-          </div>
-        </Modal>
       </motion.div>
     </div>
   );
