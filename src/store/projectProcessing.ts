@@ -14,6 +14,16 @@ const prioritizeFile = (path: string, name: string) => {
   const normalizedPath = path.toLowerCase();
   const normalizedName = name.toLowerCase();
 
+  // Penalize worktrees, hidden folders, or cache artifacts if any slipped through
+  if (
+    normalizedPath.includes('worktree') ||
+    normalizedPath.includes('.claude') ||
+    normalizedPath.includes('.angular') ||
+    normalizedPath.includes('.cache')
+  ) {
+    return 99;
+  }
+
   if (
     normalizedName === 'main.tsx' ||
     normalizedName === 'main.jsx' ||
@@ -22,13 +32,47 @@ const prioritizeFile = (path: string, name: string) => {
     normalizedName === 'main.py' ||
     normalizedName === 'server.js' ||
     normalizedName === 'index.ts' ||
-    normalizedName === 'index.js'
+    normalizedName === 'index.js' ||
+    normalizedName === 'app.module.ts' ||
+    normalizedName === 'routes.php' ||
+    normalizedName === 'api.php' ||
+    normalizedName === 'web.php'
   ) {
     return 0;
   }
 
-  if (normalizedPath.includes('/src/') || normalizedPath.includes('/server/')) return 1;
-  if (normalizedPath.includes('/components/') || normalizedPath.includes('/store/') || normalizedPath.includes('/utils/')) return 2;
+  if (
+    normalizedPath.startsWith('src/') ||
+    normalizedPath.includes('/src/') ||
+    normalizedPath.startsWith('app/') ||
+    normalizedPath.includes('/app/') ||
+    normalizedPath.startsWith('server/') ||
+    normalizedPath.includes('/server/') ||
+    normalizedPath.startsWith('backend/') ||
+    normalizedPath.includes('/backend/') ||
+    normalizedPath.startsWith('frontend/') ||
+    normalizedPath.includes('/frontend/') ||
+    normalizedPath.includes('/controllers/') ||
+    normalizedPath.includes('/services/') ||
+    normalizedPath.includes('/models/') ||
+    normalizedPath.includes('/modules/') ||
+    normalizedPath.includes('/routes/') ||
+    normalizedPath.includes('/api/')
+  ) {
+    return 1;
+  }
+
+  if (
+    normalizedPath.includes('/components/') ||
+    normalizedPath.includes('/store/') ||
+    normalizedPath.includes('/utils/') ||
+    normalizedPath.includes('/hooks/') ||
+    normalizedPath.includes('/views/') ||
+    normalizedPath.includes('/pages/')
+  ) {
+    return 2;
+  }
+
   return 3;
 };
 

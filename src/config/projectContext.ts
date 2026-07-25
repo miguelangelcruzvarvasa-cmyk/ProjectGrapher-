@@ -5,13 +5,14 @@ export const PROJECT_ANALYSIS_RULES = {
     '.scss', '.sass', '.less', '.vue', '.svelte', '.dart'
   ],
   ignoredDirectories: [
-    'node_modules', '.git', 'dist', 'build', 'venv', '.venv', 'env', '.env',
+    'node_modules', '.git', '.claude', '.angular', 'worktrees', 'worktree', '.worktrees', '.worktree',
+    'dist', 'build', 'out', 'target', 'venv', '.venv', 'env', '.env',
     'virtualenv', '.virtualenv', '__pycache__', '.pytest_cache', '.mypy_cache',
     '.ruff_cache', 'site-packages', 'dist-packages', 'pip-packages', 'Lib', 'lib64',
     'Scripts', 'Include', 'conda-meta', '.conda', 'envs', '.envs',
-    '.next', '.cache', '.vscode', '.idea', 'vendor', 'coverage',
+    '.next', '.nuxt', '.svelte-kit', '.turbo', '.output', '.cache', '.vite', '.vscode', '.idea', 'vendor', 'coverage',
     'tmp', 'temp', '.sass-cache', '.parcel-cache', 'public/build',
-    'out', 'target', 'node_modules_old', 'bower_components',
+    'node_modules_old', 'bower_components',
     'jspm_packages', '.npm', '.yarn', '.pnpm', 'obj', 'bin', 'debug', 'release',
     'ios', 'android', '.expo', 'Pods', '.gradle', 'fastlane',
     'assets', 'static', 'public', 'images', 'img', 'media', 'fonts', 'locales',

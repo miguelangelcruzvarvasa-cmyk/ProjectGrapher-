@@ -307,17 +307,27 @@ export const findDependencies = (content: string, filename: string): string[] =>
 };
 
 const VIRTUALENV_DIR_PATTERN = /^(\.?(venv|env|virtualenv)\d*|site-packages|dist-packages|__pycache__|\.pytest_cache|\.mypy_cache|\.ruff_cache)$/i;
+const IGNORED_PATH_REGEX = /(?:^|\/)(?:\.claude|\.angular|\.git|\.vscode|\.idea|\.cache|\.vite|\.next|\.nuxt|\.svelte-kit|\.turbo|\.output|node_modules|node_modules_old|bower_components|\.npm|\.yarn|\.pnpm|vendor|dist|build|worktrees|\.worktrees)(?:\/|$)/i;
 
 export const shouldProcessFile = (path: string, size: number): boolean => {
   const normalizedPath = path.replace(/\\/g, '/');
-  const filename = normalizedPath.split('/').pop() || '';
-  if (IGNORED_FILES_SET.has(filename.toLowerCase()) || IGNORED_FILES_SET.has(filename)) return false;
+  
+  // Fast path: Immediately reject paths containing known ignored directories or worktrees
+  if (IGNORED_PATH_REGEX.test(normalizedPath)) return false;
 
   const parts = normalizedPath.split('/');
-  // Filter for common build, meta, virtualenv and dependency folders
-  if (parts.some(part => {
+  const filename = parts[parts.length - 1] || '';
+  if (!filename || IGNORED_FILES_SET.has(filename.toLowerCase()) || IGNORED_FILES_SET.has(filename)) return false;
+
+  // Filter directory parts (excluding the filename)
+  const dirParts = parts.slice(0, -1);
+  if (dirParts.some(part => {
     const lower = part.toLowerCase();
-    return IGNORED_DIRS_SET.has(lower) || IGNORED_DIRS_SET.has(part) || VIRTUALENV_DIR_PATTERN.test(lower);
+    return IGNORED_DIRS_SET.has(lower) || 
+           IGNORED_DIRS_SET.has(part) || 
+           VIRTUALENV_DIR_PATTERN.test(lower) ||
+           lower.includes('worktree') ||
+           (lower.startsWith('.') && lower !== '.' && lower !== '..');
   })) return false;
   
   const ext = getExtension(normalizedPath);
