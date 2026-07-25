@@ -24,6 +24,15 @@ import { buildFileTree } from './utils/analysis';
 import { cn } from './utils/cn';
 import Markdown from 'react-markdown';
 
+// Agent Topology Shield Imports
+import { Header as TopologyHeader } from './components/Header';
+import { MultiRepoDropzone } from './components/MultiRepoDropzone';
+import { TopologyCanvas } from './components/TopologyCanvas';
+import { ContractPanel } from './components/ContractPanel';
+import { RiskMatrixPanel } from './components/RiskMatrixPanel';
+import { ShieldWorkbench } from './components/ShieldWorkbench';
+import { useTopologyStore } from './store/useTopologyStore';
+
 export default function App() {
   const {
     projectData, skippedCount, selectedNode, smartDiffData, projectMemory, isProcessing, isReviewing,
@@ -80,6 +89,8 @@ export default function App() {
     selectedNodeMemory,
     focusNodeByProjectPath
   } = useAppController();
+  const [appMode, setAppMode] = React.useState<'multi_repo_shield' | 'single_repo'>('multi_repo_shield');
+  const { repositories: topologyRepos, activeTab: topologyTab } = useTopologyStore();
   const [exportAssetTab, setExportAssetTab] = React.useState<'snapshot' | 'brief' | 'technical' | 'guide' | 'raw'>('snapshot');
   const mostCriticalFile = React.useMemo(() => {
     if (!projectData?.files || projectData.files.length === 0) return null;
