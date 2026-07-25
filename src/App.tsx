@@ -145,6 +145,23 @@ export default function App() {
     }
   ];
 
+  if (appMode === 'multi_repo_shield') {
+    return (
+      <div className="min-h-screen w-full bg-gray-950 text-gray-100 flex flex-col font-sans selection:bg-emerald-500 selection:text-black">
+        <TopologyHeader appMode={appMode} setAppMode={setAppMode} />
+
+        <main className="flex-1 w-full max-w-7xl mx-auto p-4 sm:p-6 space-y-6 overflow-y-auto">
+          <MultiRepoDropzone />
+
+          {topologyTab === 'topology' && <TopologyCanvas />}
+          {topologyTab === 'contracts' && <ContractPanel />}
+          {topologyTab === 'risk' && <RiskMatrixPanel />}
+          {topologyTab === 'shield' && <ShieldWorkbench />}
+        </main>
+      </div>
+    );
+  }
+
   if (!projectData) {
     return (
       <EmptyProjectState
@@ -152,6 +169,8 @@ export default function App() {
         isProcessing={isProcessing}
         processingProgress={processingProgress}
         onProcessFiles={processFiles}
+        appMode={appMode}
+        setAppMode={setAppMode}
       />
     );
   }
@@ -298,7 +317,16 @@ export default function App() {
             </div>
           </div>
 
-          <div className="flex items-center gap-6">
+          <div className="flex items-center gap-4">
+            <button
+              onClick={() => setAppMode('multi_repo_shield')}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-emerald-500/30 bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-300 text-xs font-bold transition-all shadow-sm"
+              title="Cambiar a Auditoría de Topología Multi-Repositorio"
+            >
+              <Network className="w-3.5 h-3.5 text-emerald-400" />
+              Multi-Repo Topology
+            </button>
+
             <div className="flex items-center gap-2 rounded-full border border-gray-800 bg-brand-surface/60 p-1">
               {(['auto', 'focused', 'expanded'] as const).map((mode) => (
                 <button

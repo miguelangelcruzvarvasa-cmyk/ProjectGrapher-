@@ -11,6 +11,7 @@ export const generateAgentShieldPack = (
   const contractWarnings: string[] = [];
   const targetFiles: string[] = [];
 
+  // Filter contract warnings
   contractLinks.forEach((link) => {
     if (link.status === 'orphan_frontend') {
       contractWarnings.push(`⚠️ ALERTA DE RUPTURA: La llamada frontend '${link.endpointUrl}' no tiene backend correspondiente.`);
@@ -23,6 +24,7 @@ export const generateAgentShieldPack = (
 
   endpoints.forEach((ep) => targetFiles.push(`${ep.repoName} -> [${ep.method}] ${ep.path}`));
 
+  // Recommend refactoring order: Database -> Backend -> Microservices -> Frontend
   const recommendedOrder = [...repositories]
     .sort((a, b) => {
       const order = { database: 1, backend: 2, microservice: 3, library: 4, frontend: 5, unknown: 6 };

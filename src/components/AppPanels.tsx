@@ -12,6 +12,8 @@ type EmptyProjectStateProps = {
   isProcessing: boolean;
   processingProgress: ProcessingProgress;
   onProcessFiles: (files: FileList) => void;
+  appMode?: 'multi_repo_shield' | 'single_repo';
+  setAppMode?: (mode: 'multi_repo_shield' | 'single_repo') => void;
 };
 
 const PROCESSING_STAGE_LABELS: Record<ProcessingProgress['stage'], string> = {
@@ -27,7 +29,9 @@ export function EmptyProjectState({
   cn,
   isProcessing,
   processingProgress,
-  onProcessFiles
+  onProcessFiles,
+  appMode,
+  setAppMode
 }: EmptyProjectStateProps) {
   const progressPercent = Math.min(100, Math.max(6, Math.round((processingProgress.ratio || 0) * 100)));
   const progressStageLabel = PROCESSING_STAGE_LABELS[processingProgress.stage] || 'Procesando';
@@ -36,6 +40,18 @@ export function EmptyProjectState({
     <div className="relative flex min-h-screen items-center justify-center overflow-hidden bg-brand-bg p-4 sm:p-6">
       <div className="absolute left-[-10%] top-[-10%] h-[40%] w-[40%] rounded-full bg-brand-primary/10 blur-[120px]" />
       <div className="absolute bottom-[-10%] right-[-10%] h-[40%] w-[40%] rounded-full bg-brand-secondary/10 blur-[120px]" />
+
+      {setAppMode && (
+        <div className="absolute top-4 right-4 z-30">
+          <button
+            onClick={() => setAppMode('multi_repo_shield')}
+            className="flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 shadow-lg backdrop-blur-md transition-all"
+          >
+            <Network className="w-4 h-4 text-emerald-400" />
+            Ir a Topología Multi-Repo (Agent Shield)
+          </button>
+        </div>
+      )}
 
       {isProcessing && (
         <div className="pointer-events-none absolute inset-0 z-20 flex items-center justify-center bg-brand-bg/72 px-4 backdrop-blur-sm">
@@ -151,6 +167,17 @@ export function EmptyProjectState({
               )}
             </label>
           </div>
+
+          {setAppMode && (
+            <div className="pt-4 border-t border-gray-800/80 w-full max-w-sm flex justify-center">
+              <button
+                onClick={() => setAppMode('multi_repo_shield')}
+                className="text-xs font-semibold text-emerald-400 hover:text-emerald-300 flex items-center gap-2 bg-emerald-500/10 px-4 py-2 rounded-xl border border-emerald-500/20 transition-all"
+              >
+                <Network className="w-4 h-4" /> Alternar a Auditoría Multi-Repositorio
+              </button>
+            </div>
+          )}
         </div>
       </motion.div>
     </div>
