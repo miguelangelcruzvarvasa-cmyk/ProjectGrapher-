@@ -28,21 +28,19 @@ export const groupFilesBySubProjects = (rootName: string, files: File[]): SubPro
     const fileName = (parts[parts.length - 1] || '').toLowerCase();
 
     if (PROJECT_SIGNATURE_FILES.has(fileName)) {
-      const subPath = parts.slice(1, -1).join('/');
-      if (subPath && !signatureMap.has(subPath)) {
-        signatureMap.set(subPath, fileName);
+      const subPathParts = parts.slice(1, -1);
+      // Only consider direct 1st-level subdirectories as subproject roots (depth === 1)
+      if (subPathParts.length === 1) {
+        const subPath = subPathParts[0];
+        if (subPath && !signatureMap.has(subPath)) {
+          signatureMap.set(subPath, fileName);
+        }
       }
     }
   });
 
-  const subPaths = Array.from(signatureMap.keys()).sort((a, b) => a.split('/').length - b.split('/').length);
-  const distinctSubPaths: string[] = [];
-
-  for (const sp of subPaths) {
-    if (!distinctSubPaths.some((parent) => sp.startsWith(`${parent}/`))) {
-      distinctSubPaths.push(sp);
-    }
-  }
+  const subPaths = Array.from(signatureMap.keys());
+  const distinctSubPaths: string[] = subPaths;
 
   if (distinctSubPaths.length >= 2) {
     const groups: SubProjectGroup[] = distinctSubPaths.map((sp) => {
