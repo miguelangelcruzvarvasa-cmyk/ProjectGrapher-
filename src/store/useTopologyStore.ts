@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import type { Repository, ProjectFile, ApiEndpoint, FrontendApiCall, ContractLink, TopologyNode, TopologyLink, AgentShieldPack } from '../types/topology';
-import { shouldProcessTopologyFile, detectRepoType, extractBackendEndpoints, extractFrontendApiCalls, isRealProjectDirectory, groupFilesBySubProjects } from '../utils/scanner';
+import { shouldProcessTopologyFile, detectRepoType, extractBackendEndpoints, extractFrontendApiCalls, isRealProjectDirectory } from '../utils/scanner';
 import { buildTopologyContracts } from '../utils/topologyGraph';
 import { generateAgentShieldPack } from '../utils/shieldGenerator';
 import { DEMO_REPOSITORIES } from '../utils/demoData';
@@ -132,93 +132,84 @@ export const useTopologyStore = create<TopologyState>((set, get) => ({
       return;
     }
 
-    // Auto-discover subprojects inside the selected folder if multiple signatures exist
-    const subProjectGroups = groupFilesBySubProjects(rawRepoName, fileArray);
+    const repoName = rawRepoName || `Repository ${get().repositories.length + 1}`;
+    const existingRepo = get().repositories.find((r) => r.name.toLowerCase() === repoName.toLowerCase());
+    const existingRepoId = existingRepo ? existingRepo.id : null;
+    const repoId = existingRepoId || `repo_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
 
-    let allRepos = [...get().repositories];
-    let allFiles = [...get().files];
-    let allEndpoints = [...get().endpoints];
-    let allApiCalls = [...get().apiCalls];
+    const filteredRepos = get().repositories.filter((r) => r.id !== repoId);
+    const filteredFiles = get().files.filter((f) => f.repoId !== repoId);
+    const filteredEndpoints = get().endpoints.filter((e) => e.repoId !== repoId);
+    const filteredApiCalls = get().apiCalls.filter((c) => c.repoId !== repoId);
 
-    for (const group of subProjectGroups) {
-      const repoName = group.repoName;
-      const existingRepo = allRepos.find((r) => r.name.toLowerCase() === repoName.toLowerCase());
-      const repoId = existingRepo ? existingRepo.id : `repo_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
+    const newFiles: ProjectFile[] = [];
+    const newEndpoints: ApiEndpoint[] = [];
+    const newApiCalls: FrontendApiCall[] = [];
+    const filePaths: string[] = [];
 
-      allRepos = allRepos.filter((r) => r.id !== repoId);
-      allFiles = allFiles.filter((f) => f.repoId !== repoId);
-      allEndpoints = allEndpoints.filter((e) => e.repoId !== repoId);
-      allApiCalls = allApiCalls.filter((c) => c.repoId !== repoId);
+    const BATCH_SIZE = 50;
 
-      const groupFiles: ProjectFile[] = [];
-      const groupEndpoints: ApiEndpoint[] = [];
-      const groupApiCalls: FrontendApiCall[] = [];
-      const filePaths: string[] = [];
+    for (let i = 0; i < fileArray.length; i += BATCH_SIZE) {
+      const batch = fileArray.slice(i, i + BATCH_SIZE);
 
-      const BATCH_SIZE = 50;
+      await Promise.all(
+        batch.map(async (file: File) => {
+          const rawPath = (file as any).webkitRelativePath || file.name;
+          if (!shouldProcessTopologyFile(rawPath, file.size)) return;
 
-      for (let i = 0; i < group.files.length; i += BATCH_SIZE) {
-        const batch = group.files.slice(i, i + BATCH_SIZE);
+          filePaths.push(rawPath);
+          let content = '';
+          try {
+            content = await file.text();
+          } catch {
+            content = '';
+          }
 
-        await Promise.all(
-          batch.map(async (file: File) => {
-            const rawPath = (file as any).webkitRelativePath || file.name;
-            if (!shouldProcessTopologyFile(rawPath, file.size)) return;
+          const projectFile: ProjectFile = {
+            id: `${repoId}_${rawPath}`,
+            repoId,
+            repoName,
+            name: file.name,
+            path: rawPath,
+            content,
+            ext: `.${file.name.split('.').pop()?.toLowerCase() || ''}`,
+            size: file.size,
+            role: 'source'
+          };
 
-            filePaths.push(rawPath);
-            let content = '';
-            try {
-              content = await file.text();
-            } catch {
-              content = '';
-            }
+          newFiles.push(projectFile);
 
-            const projectFile: ProjectFile = {
-              id: `${repoId}_${rawPath}`,
-              repoId,
-              repoName,
-              name: file.name,
-              path: rawPath,
-              content,
-              ext: `.${file.name.split('.').pop()?.toLowerCase() || ''}`,
-              size: file.size,
-              role: 'source'
-            };
+          const eps = extractBackendEndpoints(projectFile);
+          newEndpoints.push(...eps);
 
-            groupFiles.push(projectFile);
-
-            const eps = extractBackendEndpoints(projectFile);
-            groupEndpoints.push(...eps);
-
-            const calls = extractFrontendApiCalls(projectFile);
-            groupApiCalls.push(...calls);
-          })
-        );
-      }
-
-      const repoType = detectRepoType(filePaths, groupEndpoints.length);
-      const newRepo: Repository = {
-        id: repoId,
-        name: repoName,
-        type: repoType,
-        path: repoName,
-        fileCount: groupFiles.length,
-        color: repoType === 'frontend' ? '#3b82f6' : repoType === 'backend' ? '#10b981' : repoType === 'database' ? '#f59e0b' : '#8b5cf6'
-      };
-
-      allRepos.push(newRepo);
-      allFiles.push(...groupFiles);
-      allEndpoints.push(...groupEndpoints);
-      allApiCalls.push(...groupApiCalls);
+          const calls = extractFrontendApiCalls(projectFile);
+          newApiCalls.push(...calls);
+        })
+      );
     }
 
-    const { links, nodes, graphLinks } = buildTopologyContracts(allRepos, allEndpoints, allApiCalls);
+    const repoType = detectRepoType(filePaths, newEndpoints.length);
+    const newRepo: Repository = {
+      id: repoId,
+      name: repoName,
+      type: repoType,
+      path: repoName,
+      fileCount: newFiles.length,
+      color: repoType === 'frontend' ? '#3b82f6' : repoType === 'backend' ? '#10b981' : repoType === 'database' ? '#f59e0b' : '#8b5cf6'
+    };
+
+    const updatedRepos = [...filteredRepos, newRepo];
+    const updatedFiles = [...filteredFiles, ...newFiles];
+    const updatedEndpoints = [...filteredEndpoints, ...newEndpoints];
+    const updatedApiCalls = [...filteredApiCalls, ...newApiCalls];
+
+    const { links, nodes, graphLinks } = buildTopologyContracts(updatedRepos, updatedEndpoints, updatedApiCalls);
 
     set({
-      repositories: allRepos,
-      files: allFiles,
-      endpoints: allEndpoints,
-      apiCalls: allApiCalls,
+      repositories: updatedRepos,
+      files: updatedFiles,
+      endpoints: updatedEndpoints,
+      apiCalls: updatedApiCalls,
       contractLinks: links,
       nodes,
       graphLinks,

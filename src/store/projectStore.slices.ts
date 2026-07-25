@@ -462,9 +462,6 @@ export const createProjectSlice = (set: SetState, get: GetState) => ({
       return;
     }
 
-    // Auto-populate Agent Topology Shield with subprojects auto-discovery
-    useTopologyStore.getState().addRepositoryFiles(projectName || 'Project', fileList).catch(() => {});
-
     if (!workerInput.length) {
       set({
         isProcessing: false,
