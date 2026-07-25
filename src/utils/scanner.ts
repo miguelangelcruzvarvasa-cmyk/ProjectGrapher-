@@ -21,7 +21,10 @@ export const groupFilesBySubProjects = (rootName: string, files: File[]): SubPro
 
   files.forEach((file) => {
     const rawPath = (file as any).webkitRelativePath || file.name;
-    const parts = rawPath.replace(/\\/g, '/').split('/').filter(Boolean);
+    const normalizedPath = rawPath.replace(/\\/g, '/');
+    if (IGNORED_PATH_REGEX.test(normalizedPath)) return;
+
+    const parts = normalizedPath.split('/').filter(Boolean);
     const fileName = (parts[parts.length - 1] || '').toLowerCase();
 
     if (PROJECT_SIGNATURE_FILES.has(fileName)) {
@@ -55,7 +58,10 @@ export const groupFilesBySubProjects = (rootName: string, files: File[]): SubPro
 
     files.forEach((file) => {
       const rawPath = (file as any).webkitRelativePath || file.name;
-      const parts = rawPath.replace(/\\/g, '/').split('/').filter(Boolean);
+      const normalizedPath = rawPath.replace(/\\/g, '/');
+      if (IGNORED_PATH_REGEX.test(normalizedPath)) return;
+
+      const parts = normalizedPath.split('/').filter(Boolean);
       const relativeSubPath = parts.slice(1).join('/');
 
       const matchedGroup = groups.find((g) => relativeSubPath.startsWith(`${g.subPath}/`));
