@@ -7,6 +7,7 @@ import { buildAIArchitectureNarrative, buildAIAgentHandoff, buildAIRefactorPrior
 import { DEFAULT_AI_PROVIDER, getDefaultAiModel } from '../config/aiDefaults';
 import { APP_CONFIG } from '../config/appConfig';
 import { emitLiveNodeFocus } from './synapseBridgeConnector';
+import { useTopologyStore } from './useTopologyStore';
 
 type SetState = StoreApi<ProjectState>['setState'];
 type GetState = StoreApi<ProjectState>['getState'];
@@ -460,6 +461,9 @@ export const createProjectSlice = (set: SetState, get: GetState) => ({
     if (runId !== activeAnalysisRunId) {
       return;
     }
+
+    // Auto-populate Agent Topology Shield with subprojects auto-discovery
+    useTopologyStore.getState().addRepositoryFiles(projectName || 'Project', fileList).catch(() => {});
 
     if (!workerInput.length) {
       set({

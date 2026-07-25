@@ -10,6 +10,82 @@ export const PROJECT_SIGNATURE_FILES = new Set([
   'appsettings.json', 'cargo.toml', 'dockerfile', 'makefile', '.git'
 ]);
 
+export interface SubProjectGroup {
+  repoName: string;
+  subPath: string;
+  files: File[];
+}
+
+export const groupFilesBySubProjects = (rootName: string, files: File[]): SubProjectGroup[] => {
+  const signatureMap = new Map<string, string>();
+
+  files.forEach((file) => {
+    const rawPath = (file as any).webkitRelativePath || file.name;
+    const parts = rawPath.replace(/\\/g, '/').split('/').filter(Boolean);
+    const fileName = (parts[parts.length - 1] || '').toLowerCase();
+
+    if (PROJECT_SIGNATURE_FILES.has(fileName)) {
+      const subPath = parts.slice(1, -1).join('/');
+      if (subPath && !signatureMap.has(subPath)) {
+        signatureMap.set(subPath, fileName);
+      }
+    }
+  });
+
+  const subPaths = Array.from(signatureMap.keys()).sort((a, b) => a.split('/').length - b.split('/').length);
+  const distinctSubPaths: string[] = [];
+
+  for (const sp of subPaths) {
+    if (!distinctSubPaths.some((parent) => sp.startsWith(`${parent}/`))) {
+      distinctSubPaths.push(sp);
+    }
+  }
+
+  if (distinctSubPaths.length >= 2) {
+    const groups: SubProjectGroup[] = distinctSubPaths.map((sp) => {
+      const folderName = sp.split('/').pop() || sp;
+      return {
+        repoName: folderName,
+        subPath: sp,
+        files: []
+      };
+    });
+
+    const rootFiles: File[] = [];
+
+    files.forEach((file) => {
+      const rawPath = (file as any).webkitRelativePath || file.name;
+      const parts = rawPath.replace(/\\/g, '/').split('/').filter(Boolean);
+      const relativeSubPath = parts.slice(1).join('/');
+
+      const matchedGroup = groups.find((g) => relativeSubPath.startsWith(`${g.subPath}/`));
+      if (matchedGroup) {
+        matchedGroup.files.push(file);
+      } else {
+        rootFiles.push(file);
+      }
+    });
+
+    if (rootFiles.length > 0) {
+      groups.push({
+        repoName: rootName || 'Root Project',
+        subPath: '',
+        files: rootFiles
+      });
+    }
+
+    return groups.filter((g) => g.files.length > 0);
+  }
+
+  return [
+    {
+      repoName: rootName || 'Repository',
+      subPath: '',
+      files
+    }
+  ];
+};
+
 export const shouldProcessTopologyFile = (path: string, size: number): boolean => {
   const normalizedPath = path.replace(/\\/g, '/');
   if (IGNORED_PATH_REGEX.test(normalizedPath)) return false;
@@ -98,37 +174,31 @@ export const extractBackendEndpoints = (file: ProjectFile): ApiEndpoint[] => {
 
   let match: RegExpExecArray | null;
 
-  // 1. Laravel Routes: Route::get('/path', ...)
   const laravelRouteRegex = /Route::(get|post|put|delete|patch|options)\s*\(\s*['"]([^'"]+)['"]/gi;
   while ((match = laravelRouteRegex.exec(content)) !== null) {
     pushEndpoint(match[1].toUpperCase() as ApiEndpoint['method'], match[2], match.index);
   }
 
-  // 2. Express / Node: app.get('/path', ...), router.post('/path', ...)
   const expressRegex = /(?:app|router)\.(get|post|put|delete|patch|options)\s*\(\s*['"]([^'"]+)['"]/gi;
   while ((match = expressRegex.exec(content)) !== null) {
     pushEndpoint(match[1].toUpperCase() as ApiEndpoint['method'], match[2], match.index);
   }
 
-  // 3. FastAPI / Flask (Python): @app.get("/path"), @router.post("/path"), @api.route("/path", methods=["GET"])
   const pythonRouteRegex = /@(?:app|router|api)\.(get|post|put|delete|patch)\s*\(\s*["']([^"']+)["']/gi;
   while ((match = pythonRouteRegex.exec(content)) !== null) {
     pushEndpoint(match[1].toUpperCase() as ApiEndpoint['method'], match[2], match.index);
   }
 
-  // 4. NestJS Decorators: @Get('path'), @Post('path'), @Put('path'), @Delete('path'), @Patch('path')
   const nestJsRegex = /@(Get|Post|Put|Delete|Patch)\s*\(\s*['"]([^'"]*)['"]\s*\)/gi;
   while ((match = nestJsRegex.exec(content)) !== null) {
     pushEndpoint(match[1].toUpperCase() as ApiEndpoint['method'], match[2] || '/', match.index);
   }
 
-  // 5. Spring Boot Java: @GetMapping("/path"), @PostMapping("/path"), @PutMapping("/path"), @DeleteMapping("/path")
   const springBootRegex = /@(Get|Post|Put|Delete|Patch)Mapping\s*\(\s*(?:value\s*=\s*)?["']([^"']+)["']/gi;
   while ((match = springBootRegex.exec(content)) !== null) {
     pushEndpoint(match[1].toUpperCase() as ApiEndpoint['method'], match[2], match.index);
   }
 
-  // 6. Django URLs: path('api/v1/users/', ...), re_path(r'^users/', ...)
   const djangoRegex = /path\s*\(\s*["']([^"']+)["']/gi;
   while ((match = djangoRegex.exec(content)) !== null) {
     pushEndpoint('GET', match[1], match.index);
@@ -159,13 +229,11 @@ export const extractFrontendApiCalls = (file: ProjectFile): FrontendApiCall[] =>
 
   let match: RegExpExecArray | null;
 
-  // 1. HttpClient Angular / Axios / Custom HTTP Clients: this.http.get('/path'), axios.post('/path'), api.get('/path'), client.post('/path')
   const clientCallRegex = /(?:this\.http|axios|http|api|client|apiClient|service)\.(get|post|put|delete|patch)\s*(?:<[^>]+>)?\s*\(\s*[`'"]([^`'"]+)[`'"]/gi;
   while ((match = clientCallRegex.exec(content)) !== null) {
     pushCall(match[1].toUpperCase(), match[2], match.index);
   }
 
-  // 2. Standard fetch('/api/path', { method: 'POST' }) o fetch('/api/path')
   const fetchRegex = /fetch\s*\(\s*[`'"]([^`'"]+)[`'"](?:\s*,\s*\{\s*method:\s*['"]([a-zA-Z]+)['"])?/gi;
   while ((match = fetchRegex.exec(content)) !== null) {
     const url = match[1];
