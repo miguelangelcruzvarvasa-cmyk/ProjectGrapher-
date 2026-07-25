@@ -89,7 +89,7 @@ export default function App() {
     selectedNodeMemory,
     focusNodeByProjectPath
   } = useAppController();
-  const [appMode, setAppMode] = React.useState<'multi_repo_shield' | 'single_repo'>('multi_repo_shield');
+  const [appMode, setAppMode] = React.useState<'multi_repo_shield' | 'single_repo'>('single_repo');
   const { repositories: topologyRepos, activeTab: topologyTab } = useTopologyStore();
   const [exportAssetTab, setExportAssetTab] = React.useState<'snapshot' | 'brief' | 'technical' | 'guide' | 'raw'>('snapshot');
   const mostCriticalFile = React.useMemo(() => {
