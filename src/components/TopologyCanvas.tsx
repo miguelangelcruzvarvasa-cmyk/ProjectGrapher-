@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState, useCallback } from 'react';
+import React, { useEffect, useMemo } from 'react';
 import {
   ReactFlow,
   Controls,
@@ -13,8 +13,7 @@ import {
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
 import { useTopologyStore } from '../store/useTopologyStore';
-import { Globe, Server, Database, Cpu, Layers, FolderTree, LayoutGrid } from 'lucide-react';
-import { FolderNode } from './graph/FolderNode';
+import { Globe, Server, Database, Cpu, Layers } from 'lucide-react';
 
 const CustomRepoNode = ({ data }: any) => {
   const getIcon = () => {
@@ -46,141 +45,89 @@ const CustomRepoNode = ({ data }: any) => {
 };
 
 export const TopologyCanvas: React.FC = () => {
-  const { repositories, contractLinks, files } = useTopologyStore();
+  const { repositories, contractLinks } = useTopologyStore();
   const [nodes, setNodes, onNodesChange] = useNodesState([]);
   const [edges, setEdges, onEdgesChange] = useEdgesState([]);
-  const [viewMode, setViewMode] = useState<'macro' | 'micro'>('macro');
-  const [expandedFolders, setExpandedFolders] = useState<Set<string>>(new Set());
-
-  const handleToggleFolder = useCallback((folderPath: string) => {
-    setExpandedFolders((prev) => {
-      const next = new Set(prev);
-      if (next.has(folderPath)) {
-        next.delete(folderPath);
-      } else {
-        next.add(folderPath);
-      }
-      return next;
-    });
-  }, []);
 
   const nodeTypes = useMemo(() => ({
-    repoNode: CustomRepoNode,
-    folderNode: FolderNode,
+    repoNode: CustomRepoNode
   }), []);
 
   useEffect(() => {
-    if (repositories.length === 0) return;
+    if (repositories.length === 0) {
+      setNodes([]);
+      setEdges([]);
+      return;
+    }
 
-    if (viewMode === 'macro') {
-      const getRepoNodeId = (idOrName: string) => {
-        const found = repositories.find((r) => r.id === idOrName || r.name === idOrName);
-        return found ? found.id : idOrName;
+    const getRepoNodeId = (idOrName: string) => {
+      const found = repositories.find((r) => r.id === idOrName || r.name === idOrName);
+      return found ? found.id : idOrName;
+    };
+
+    const flowNodes = repositories.map((repo, i) => {
+      const radius = Math.max(180, repositories.length * 60);
+      const angle = (i * 2 * Math.PI) / repositories.length - Math.PI / 2;
+      const x = 500 + radius * Math.cos(angle);
+      const y = 300 + radius * Math.sin(angle);
+
+      return {
+        id: repo.id,
+        type: 'repoNode',
+        position: { x, y },
+        data: {
+          label: repo.name,
+          type: repo.type,
+          fileCount: repo.fileCount
+        }
       };
+    });
 
-      const flowNodes = repositories.map((repo, i) => {
-        const radius = 280;
-        const angle = (i * 2 * Math.PI) / repositories.length - Math.PI / 2;
-        const x = 500 + radius * Math.cos(angle);
-        const y = 300 + radius * Math.sin(angle);
+    const flowEdges = contractLinks
+      .filter((link) => link.sourceRepoId !== 'unknown' && link.targetRepoId !== 'unknown')
+      .map((link) => {
+        const isMismatch = link.status === 'mismatch';
+        const sourceId = getRepoNodeId(link.sourceRepoId);
+        const targetId = getRepoNodeId(link.targetRepoId);
 
         return {
-          id: repo.id,
-          type: 'repoNode',
-          position: { x, y },
-          data: {
-            label: repo.name,
-            type: repo.type,
-            fileCount: repo.fileCount
-          }
+          id: link.id,
+          source: sourceId,
+          target: targetId,
+          animated: true,
+          style: {
+            stroke: isMismatch ? '#f43f5e' : '#10b981',
+            strokeWidth: isMismatch ? 3 : 2
+          },
+          markerEnd: {
+            type: MarkerType.ArrowClosed,
+            color: isMismatch ? '#f43f5e' : '#10b981'
+          },
+          label: isMismatch ? '⛔ DESAJUSTE HTTP' : '✅ CONTRATO VÁLIDO',
+          labelStyle: { fill: isMismatch ? '#f43f5e' : '#10b981', fontWeight: 700, fontSize: 10 },
+          labelBgStyle: { fill: '#030712', fillOpacity: 0.95, rx: 6, ry: 6 }
         };
       });
 
-      const flowEdges = contractLinks
-        .filter((link) => link.sourceRepoId !== 'unknown' && link.targetRepoId !== 'unknown')
-        .map((link) => {
-          const isMismatch = link.status === 'mismatch';
-          const sourceId = getRepoNodeId(link.sourceRepoId);
-          const targetId = getRepoNodeId(link.targetRepoId);
-
-          return {
-            id: link.id,
-            source: sourceId,
-            target: targetId,
-            animated: true,
-            style: {
-              stroke: isMismatch ? '#f43f5e' : '#10b981',
-              strokeWidth: isMismatch ? 3 : 2
-            },
-            markerEnd: {
-              type: MarkerType.ArrowClosed,
-              color: isMismatch ? '#f43f5e' : '#10b981'
-            },
-            label: isMismatch ? '⛔ DESAJUSTE HTTP' : '✅ CONTRATO VÁLIDO',
-            labelStyle: { fill: isMismatch ? '#f43f5e' : '#10b981', fontWeight: 700, fontSize: 10 },
-            labelBgStyle: { fill: '#030712', fillOpacity: 0.95, rx: 6, ry: 6 }
-          };
-        });
-
-      if (flowEdges.length === 0 && repositories.length > 1) {
-        for (let i = 0; i < repositories.length - 1; i++) {
-          flowEdges.push({
-            id: `struct_edge_${i}`,
-            source: repositories[i].id,
-            target: repositories[i + 1].id,
-            animated: true,
-            style: { stroke: '#3b82f6', strokeWidth: 2, strokeDasharray: '4,4' },
-            markerEnd: { type: MarkerType.ArrowClosed, color: '#3b82f6' },
-            label: '🔗 TOPOLOGÍA ENTORNO',
-            labelStyle: { fill: '#3b82f6', fontWeight: 600, fontSize: 9 },
-            labelBgStyle: { fill: '#030712', fillOpacity: 0.9, rx: 4, ry: 4 }
-          } as any);
-        }
+    if (flowEdges.length === 0 && repositories.length > 1) {
+      for (let i = 0; i < repositories.length - 1; i++) {
+        flowEdges.push({
+          id: `struct_edge_${i}`,
+          source: repositories[i].id,
+          target: repositories[i + 1].id,
+          animated: true,
+          style: { stroke: '#3b82f6', strokeWidth: 2, strokeDasharray: '4,4' },
+          markerEnd: { type: MarkerType.ArrowClosed, color: '#3b82f6' },
+          label: '🔗 TOPOLOGÍA ENTORNO',
+          labelStyle: { fill: '#3b82f6', fontWeight: 600, fontSize: 9 },
+          labelBgStyle: { fill: '#030712', fillOpacity: 0.9, rx: 4, ry: 4 }
+        } as any);
       }
-
-      setNodes(flowNodes as any);
-      setEdges(flowEdges as any);
-    } else {
-      const folderGroups = new Map<string, typeof files>();
-      files.forEach((f) => {
-        const parts = f.path.split('/').filter(Boolean);
-        const folderPath = parts.length > 1 ? `${f.repoName}/${parts.slice(0, Math.min(2, parts.length - 1)).join('/')}` : f.repoName;
-        if (!folderGroups.has(folderPath)) {
-          folderGroups.set(folderPath, []);
-        }
-        folderGroups.get(folderPath)!.push(f);
-      });
-
-      const folderNodesArr: any[] = [];
-      let idx = 0;
-
-      folderGroups.forEach((groupFiles, folderPath) => {
-        const folderName = folderPath.split('/').slice(-1)[0] || folderPath;
-        const cols = Math.ceil(Math.sqrt(folderGroups.size));
-        const row = Math.floor(idx / cols);
-        const col = idx % cols;
-
-        folderNodesArr.push({
-          id: `folder:${folderPath}`,
-          type: 'folderNode',
-          position: { x: col * 260 + 100, y: row * 160 + 100 },
-          data: {
-            folderPath,
-            folderName,
-            fileCount: groupFiles.length,
-            isExpanded: expandedFolders.has(folderPath),
-            isSelected: false,
-            isDimmed: false,
-            onToggleExpand: handleToggleFolder
-          }
-        });
-        idx++;
-      });
-
-      setNodes(folderNodesArr);
-      setEdges([]);
     }
-  }, [repositories, contractLinks, files, viewMode, expandedFolders, handleToggleFolder, setNodes, setEdges]);
+
+    setNodes(flowNodes as any);
+    setEdges(flowEdges as any);
+  }, [repositories, contractLinks, setNodes, setEdges]);
 
   return (
     <div className="w-full flex-1 flex flex-col space-y-4">
@@ -189,42 +136,18 @@ export const TopologyCanvas: React.FC = () => {
           <div>
             <h3 className="text-lg font-bold text-white flex items-center gap-2 font-display">
               <Layers className="w-5 h-5 text-emerald-400" />
-              Lienzo Interactivo de Topología Multi-Repo
+              Topología de Repositorios Auditados
             </h3>
             <p className="text-xs text-gray-400">
-              Examina la arquitectura de repositorios, contratos de API e inspecciona carpetas sin congelamientos.
+              Visualiza los repositorios de tu entorno y sus enlaces de contrato inter-servicio.
             </p>
           </div>
 
-          <div className="flex items-center gap-3">
-            <div className="bg-gray-950 p-1 rounded-xl border border-gray-800 flex items-center gap-1">
-              <button
-                onClick={() => setViewMode('macro')}
-                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${
-                  viewMode === 'macro'
-                    ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/40 shadow-sm'
-                    : 'text-gray-400 hover:text-gray-200'
-                }`}
-              >
-                <LayoutGrid className="w-3.5 h-3.5" /> Topología Repos (Macro)
-              </button>
-              <button
-                onClick={() => setViewMode('micro')}
-                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${
-                  viewMode === 'micro'
-                    ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/40 shadow-sm'
-                    : 'text-gray-400 hover:text-gray-200'
-                }`}
-              >
-                <FolderTree className="w-3.5 h-3.5" /> Carpetas / Código (Micro)
-              </button>
-            </div>
-
-            <div className="hidden lg:flex flex-wrap items-center gap-3 text-xs">
-              <div className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-full bg-blue-500"></span> Frontend</div>
-              <div className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-full bg-emerald-500"></span> Backend</div>
-              <div className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-full bg-purple-500"></span> Microservice</div>
-            </div>
+          <div className="flex items-center gap-3 text-xs">
+            <div className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-full bg-blue-500"></span> Frontend</div>
+            <div className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-full bg-emerald-500"></span> Backend</div>
+            <div className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-full bg-amber-500"></span> Database</div>
+            <div className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-full bg-purple-500"></span> Microservice</div>
           </div>
         </div>
 
