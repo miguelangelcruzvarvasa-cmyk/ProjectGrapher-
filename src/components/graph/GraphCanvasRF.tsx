@@ -19,6 +19,7 @@ import {
 import * as d3 from 'd3';
 import { GraphNode, GraphLink } from '../../types';
 import { FileNode } from './FileNode';
+import { FolderNode } from './FolderNode';
 import '@xyflow/react/dist/style.css';
 
 // ─── Custom Floating Edge Component ──────────────────────────────────────────
@@ -49,8 +50,8 @@ const FloatingEdge: React.FC<EdgeProps> = ({
   const dy = targetY - sourceY;
   const dist = Math.sqrt(dx * dx + dy * dy) || 1;
 
-  const sourceRadius = (sourceNode.data as any).size || 12;
-  const targetRadius = ((targetNode.data as any).size || 12) + 2;
+  const sourceRadius = (sourceNode.data as any).size || 16;
+  const targetRadius = ((targetNode.data as any).size || 16) + 2;
 
   const sx = sourceX + (dx / dist) * sourceRadius;
   const sy = sourceY + (dy / dist) * sourceRadius;
@@ -86,10 +87,19 @@ interface GraphCanvasProps {
 
 const nodeTypes = {
   file: FileNode,
+  folder: FolderNode,
 };
 
 const edgeTypes = {
   floating: FloatingEdge,
+};
+
+// Helper: Extraer ruta de carpeta contenedora para un archivo
+const getFolderPathForNode = (node: GraphNode): string => {
+  const filePath = node.data?.path || node.id;
+  const parts = filePath.split('/').filter(Boolean);
+  if (parts.length <= 1) return 'root';
+  return parts.slice(0, Math.min(2, parts.length - 1)).join('/');
 };
 
 const GraphCanvasInner: React.FC<GraphCanvasProps> = ({
@@ -102,9 +112,22 @@ const GraphCanvasInner: React.FC<GraphCanvasProps> = ({
 }) => {
   const [rfNodes, setRfNodes, onNodesChange] = useNodesState([]);
   const [rfEdges, setRfEdges, onEdgesChange] = useEdgesState([]);
+  const [expandedFolders, setExpandedFolders] = useState<Set<string>>(new Set());
   const { fitView } = useReactFlow();
 
-  // Run d3 force layout headlessly on initial mount / dataset changes
+  const handleToggleExpand = useCallback((folderPath: string) => {
+    setExpandedFolders((prev) => {
+      const next = new Set(prev);
+      if (next.has(folderPath)) {
+        next.delete(folderPath);
+      } else {
+        next.add(folderPath);
+      }
+      return next;
+    });
+  }, []);
+
+  // Run d3 force layout headlessly on initial mount / dataset changes or when folder expansion toggles
   useEffect(() => {
     if (!nodes.length) {
       setRfNodes([]);
@@ -115,28 +138,111 @@ const GraphCanvasInner: React.FC<GraphCanvasProps> = ({
     const width = 1200;
     const height = 900;
 
-    // Headless simulation nodes
-    const simNodes = nodes.map((n) => ({
-      ...n,
-      x: n.x ?? (width / 2 + (Math.random() - 0.5) * 200),
-      y: n.y ?? (height / 2 + (Math.random() - 0.5) * 200),
-    }));
+    // 1. Clasificar nodos en carpetas y archivos visibles
+    const folderMap = new Map<string, GraphNode[]>();
+    const rootFiles: GraphNode[] = [];
 
-    const nodeMap = new Map(simNodes.map((n) => [n.id, n]));
-
-    const activeLinks = links.filter((link) => {
-      const sourceId = typeof link.source === 'string' ? link.source : link.source.id;
-      const targetId = typeof link.target === 'string' ? link.target : link.target.id;
-      return nodeMap.has(sourceId) && nodeMap.has(targetId);
+    nodes.forEach((n) => {
+      const folderPath = getFolderPathForNode(n);
+      if (folderPath === 'root') {
+        rootFiles.push(n);
+      } else {
+        if (!folderMap.has(folderPath)) {
+          folderMap.set(folderPath, []);
+        }
+        folderMap.get(folderPath)!.push(n);
+      }
     });
 
-    const simLinks = activeLinks.map((l) => ({
-      source: typeof l.source === 'string' ? l.source : l.source.id,
-      target: typeof l.target === 'string' ? l.target : l.target.id,
+    const visibleNodes: (GraphNode & { isFolder?: boolean; folderPath?: string; fileCount?: number })[] = [];
+    const nodeToVisibleIdMap = new Map<string, string>();
+
+    // Agregar archivos raíz
+    rootFiles.forEach((f) => {
+      visibleNodes.push(f);
+      nodeToVisibleIdMap.set(f.id, f.id);
+    });
+
+    // Procesar cada carpeta
+    const shouldAutoCluster = nodes.length > 50;
+
+    folderMap.forEach((filesInFolder, folderPath) => {
+      const isExpanded = expandedFolders.has(folderPath);
+
+      if (shouldAutoCluster && !isExpanded) {
+        // Carpeta colapsada: representar como un único nodo de carpeta
+        const folderNodeId = `folder:${folderPath}`;
+        const folderName = folderPath.split('/').pop() || folderPath;
+
+        visibleNodes.push({
+          id: folderNodeId,
+          label: folderName,
+          group: folderPath,
+          cluster: folderPath,
+          size: Math.min(45, 20 + Math.sqrt(filesInFolder.length) * 3),
+          isFolder: true,
+          folderPath,
+          fileCount: filesInFolder.length,
+          data: {
+            id: folderNodeId,
+            name: folderName,
+            path: folderPath,
+            content: '',
+            ext: '',
+            size: filesInFolder.reduce((sum, f) => sum + (f.data?.size || 0), 0),
+            importance: 0,
+          },
+        });
+
+        // Todos los archivos dentro de esta carpeta redirigen su ID al ID del nodo carpeta
+        filesInFolder.forEach((f) => {
+          nodeToVisibleIdMap.set(f.id, folderNodeId);
+        });
+      } else {
+        // Carpeta expandida o proyecto pequeño: mostrar archivos individuales
+        filesInFolder.forEach((f) => {
+          visibleNodes.push(f);
+          nodeToVisibleIdMap.set(f.id, f.id);
+        });
+      }
+    });
+
+    // 2. Headless simulation nodes para los nodos visibles
+    const simNodes = visibleNodes.map((n) => ({
+      ...n,
+      x: n.x ?? (width / 2 + (Math.random() - 0.5) * 250),
+      y: n.y ?? (height / 2 + (Math.random() - 0.5) * 250),
     }));
 
+    const visibleNodeMap = new Map(simNodes.map((n) => [n.id, n]));
+
+    // 3. Mapear y consolidar enlaces para nodos visibles
+    const rawLinksMap = new Map<string, { source: string; target: string; count: number }>();
+
+    links.forEach((link) => {
+      const origSource = typeof link.source === 'string' ? link.source : link.source.id;
+      const origTarget = typeof link.target === 'string' ? link.target : link.target.id;
+
+      const visibleSource = nodeToVisibleIdMap.get(origSource) || origSource;
+      const visibleTarget = nodeToVisibleIdMap.get(origTarget) || origTarget;
+
+      if (visibleSource && visibleTarget && visibleSource !== visibleTarget) {
+        if (visibleNodeMap.has(visibleSource) && visibleNodeMap.has(visibleTarget)) {
+          const key = `${visibleSource}::${visibleTarget}`;
+          const existing = rawLinksMap.get(key);
+          if (existing) {
+            existing.count += 1;
+          } else {
+            rawLinksMap.set(key, { source: visibleSource, target: visibleTarget, count: 1 });
+          }
+        }
+      }
+    });
+
+    const simLinks = Array.from(rawLinksMap.values());
+
     // Orbit centers for clusters
-    const clusterNames = Array.from(new Set(nodes.map((node) => node.cluster || 'root'))).sort();
+    const clusterNames = Array.from(new Set(simNodes.map((node) => node.cluster || 'root'))).sort();
     const clusterTargets = new Map<string, { x: number; y: number }>();
     const effectiveClusterCount = Math.max(clusterNames.length, 1);
     const orbitRadiusX = width * 0.32;
@@ -154,28 +260,28 @@ const GraphCanvasInner: React.FC<GraphCanvasProps> = ({
       });
     });
 
-    // Run the forces
+    // Run the D3 force simulation on visible nodes only
     const simulation = d3.forceSimulation<any>(simNodes)
       .force('link', d3.forceLink<any, any>(simLinks)
         .id((d) => d.id)
         .distance((d) => {
-          const s = nodeMap.get(d.source.id);
-          const t = nodeMap.get(d.target.id);
-          return s?.cluster === t?.cluster ? 110 : 250;
+          const s = visibleNodeMap.get(d.source.id);
+          const t = visibleNodeMap.get(d.target.id);
+          return s?.cluster === t?.cluster ? 130 : 280;
         })
         .strength((d) => {
-          const s = nodeMap.get(d.source.id);
-          const t = nodeMap.get(d.target.id);
-          return s?.cluster === t?.cluster ? 0.9 : 0.2;
+          const s = visibleNodeMap.get(d.source.id);
+          const t = visibleNodeMap.get(d.target.id);
+          return s?.cluster === t?.cluster ? 0.8 : 0.25;
         })
       )
-      .force('charge', d3.forceManyBody().strength(-350))
+      .force('charge', d3.forceManyBody().strength((d: any) => (d.isFolder ? -500 : -300)))
       .force('center', d3.forceCenter(width / 2, height / 2))
       .force('x', d3.forceX((d: any) => clusterTargets.get(d.cluster || 'root')?.x ?? width / 2).strength(0.25))
       .force('y', d3.forceY((d: any) => clusterTargets.get(d.cluster || 'root')?.y ?? height / 2).strength(0.25))
-      .force('collision', d3.forceCollide().radius((d: any) => d.size + 42));
+      .force('collision', d3.forceCollide().radius((d: any) => (d.isFolder ? 80 : d.size + 42)));
 
-    // Run ticks synchronously to avoid layout flicker
+    // Run ticks synchronously
     for (let i = 0; i < 180; ++i) {
       simulation.tick();
     }
@@ -190,9 +296,9 @@ const GraphCanvasInner: React.FC<GraphCanvasProps> = ({
     const connectedNodes = new Set<string>();
     if (selectedNodeId) {
       connectedNodes.add(selectedNodeId);
-      activeLinks.forEach((l) => {
-        const sId = typeof l.source === 'string' ? l.source : l.source.id;
-        const tId = typeof l.target === 'string' ? l.target : l.target.id;
+      simLinks.forEach((l) => {
+        const sId = typeof l.source === 'string' ? l.source : (l.source as any).id;
+        const tId = typeof l.target === 'string' ? l.target : (l.target as any).id;
         if (sId === selectedNodeId) connectedNodes.add(tId);
         if (tId === selectedNodeId) connectedNodes.add(sId);
       });
@@ -202,12 +308,29 @@ const GraphCanvasInner: React.FC<GraphCanvasProps> = ({
       const isSelected = n.id === selectedNodeId;
       const isDimmed = selectedNodeId ? !connectedNodes.has(n.id) : false;
 
+      if (n.isFolder) {
+        return {
+          id: n.id,
+          type: 'folder',
+          position: {
+            x: (n.x || 0) - 80,
+            y: (n.y || 0) - 25,
+          },
+          data: {
+            folderPath: n.folderPath || n.id,
+            folderName: n.label,
+            fileCount: n.fileCount || 0,
+            isExpanded: expandedFolders.has(n.folderPath || ''),
+            isSelected,
+            isDimmed,
+            onToggleExpand: handleToggleExpand,
+          },
+        };
+      }
+
       return {
         id: n.id,
         type: 'file',
-        // Center the node element around its calculated coordinate
-        // Custom FileNodes are sized centered, but React Flow positions from top-left.
-        // FileNode size is data.size * 2 + 20. Let's offset to align perfectly.
         position: {
           x: (n.x || 0) - n.size - 10,
           y: (n.y || 0) - n.size - 10,
@@ -216,8 +339,8 @@ const GraphCanvasInner: React.FC<GraphCanvasProps> = ({
           projectFile: n.data,
           size: n.size,
           importance: n.data.importance || 0,
-          isHighImportance: n.data.importance >= highImportanceThreshold,
-          isMediumImportance: n.data.importance >= mediumImportanceThreshold,
+          isHighImportance: (n.data.importance || 0) >= highImportanceThreshold,
+          isMediumImportance: (n.data.importance || 0) >= mediumImportanceThreshold,
           isSelected,
           isDimmed,
           isFocusMode,
@@ -225,9 +348,9 @@ const GraphCanvasInner: React.FC<GraphCanvasProps> = ({
       };
     });
 
-    const calculatedRfEdges: Edge[] = activeLinks.map((l, index) => {
-      const sId = typeof l.source === 'string' ? l.source : l.source.id;
-      const tId = typeof l.target === 'string' ? l.target : l.target.id;
+    const calculatedRfEdges: Edge[] = simLinks.map((l, index) => {
+      const sId = typeof l.source === 'string' ? l.source : (l.source as any).id;
+      const tId = typeof l.target === 'string' ? l.target : (l.target as any).id;
       const isConnected = selectedNodeId ? (sId === selectedNodeId || tId === selectedNodeId) : false;
 
       return {
@@ -238,8 +361,8 @@ const GraphCanvasInner: React.FC<GraphCanvasProps> = ({
         animated: isConnected,
         style: {
           stroke: isConnected ? '#6366f1' : '#374151',
-          strokeWidth: isConnected ? 2.2 : 0.9,
-          opacity: selectedNodeId ? (isConnected ? 1 : 0.05) : 0.3,
+          strokeWidth: isConnected ? 2.2 : (l.count > 1 ? 1.8 : 0.9),
+          opacity: selectedNodeId ? (isConnected ? 1 : 0.05) : 0.35,
           transition: 'stroke 180ms ease, opacity 180ms ease',
         },
         markerEnd: {
@@ -259,7 +382,7 @@ const GraphCanvasInner: React.FC<GraphCanvasProps> = ({
       fitView({ padding: 0.15, duration: 400 });
     }, 50);
 
-  }, [nodes, links, selectedNodeId, isFocusMode, fitView, setRfNodes, setRfEdges]);
+  }, [nodes, links, selectedNodeId, isFocusMode, expandedFolders, handleToggleExpand, fitView, setRfNodes, setRfEdges]);
 
   // Handle Node clicks
   const onNodeClickCallback = useCallback(
