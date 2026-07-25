@@ -119,9 +119,8 @@ export const prepareProjectFilesForWorker = async (
   fileList: FileList,
   onProgress?: (progress: ProgressPayload) => void
 ) => {
-  const filesArray = Array.from(fileList);
-  const firstFile = filesArray[0];
-  if (!firstFile) {
+  const totalFiles = fileList.length;
+  if (totalFiles === 0) {
     return {
       projectName: '',
       skippedCount: 0,
@@ -129,21 +128,25 @@ export const prepareProjectFilesForWorker = async (
     };
   }
 
-  const relativePath = (firstFile as any).webkitRelativePath as string | undefined;
+  const firstFile = fileList[0];
+  const relativePath = (firstFile as any)?.webkitRelativePath as string | undefined;
   const projectName = relativePath?.split('/')[0] || 'Project';
 
   const candidateFiles: { file: File; path: string; name: string; size: number }[] = [];
+  const BATCH_SIZE = 1000;
 
-  for (let index = 0; index < filesArray.length; index += SCAN_BATCH_SIZE) {
-    const limit = Math.min(index + SCAN_BATCH_SIZE, filesArray.length);
+  for (let index = 0; index < totalFiles; index += BATCH_SIZE) {
+    const limit = Math.min(index + BATCH_SIZE, totalFiles);
 
     for (let innerIndex = index; innerIndex < limit; innerIndex++) {
-      const file = filesArray[innerIndex];
+      const file = fileList[innerIndex];
       if (!file) continue;
 
       const rawPath = (file as any).webkitRelativePath || file.name;
+      // Fast path check directly on rawPath before heavy string manipulation
+      if (!shouldProcessFile(rawPath, file.size)) continue;
+
       const path = getProjectRelativePath(rawPath);
-      if (!shouldProcessFile(path, file.size)) continue;
 
       candidateFiles.push({
         file,
@@ -157,23 +160,21 @@ export const prepareProjectFilesForWorker = async (
       stage: 'scanning',
       message: 'Revisando estructura del proyecto y filtrando archivos relevantes...',
       current: limit,
-      total: filesArray.length,
-      ratio: filesArray.length ? limit / filesArray.length : 0
+      total: totalFiles,
+      ratio: limit / totalFiles
     });
+
     await yieldToBrowser();
   }
 
+  // Fast string comparison instead of heavy Intl localeCompare
   candidateFiles.sort((a, b) => {
     const priorityDiff = prioritizeFile(a.path, a.name) - prioritizeFile(b.path, b.name);
     if (priorityDiff !== 0) return priorityDiff;
-    return a.path.localeCompare(b.path);
+    return a.path < b.path ? -1 : (a.path > b.path ? 1 : 0);
   });
 
   const selectedCandidates = candidateFiles.slice(0, MAX_GRAPH_FILES);
-
-  // Importante: skippedCount cuenta solo los candidatos válidos que se
-  // quedaron fuera por el límite MAX_GRAPH_FILES, no los archivos ya
-  // descartados por shouldProcessFile (node_modules, binarios, etc).
   const skippedCount = candidateFiles.length - selectedCandidates.length;
 
   const workerInput: WorkerInputFile[] = selectedCandidates.map(({ file, path, name, size }) => ({
