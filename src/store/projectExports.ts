@@ -2,7 +2,7 @@ import { APP_CONFIG } from '../config/appConfig';
 import { ProjectData } from '../types';
 import { SNAPSHOT_EXPORT_CONFIG } from '../config/projectContext';
 import { buildFileTree, generateTreeText, summarizeFileSemantics } from '../utils/analysis';
-import { detectTechStackSignals, formatProjectPaths, getTopItems, withProjectRoot } from './projectInsights';
+import { detectTechStackSignals, extractTargetProjectIdentity, formatProjectPaths, getTopItems, isEntryPointFile, withProjectRoot } from './projectInsights';
 
 const TRIVIAL_FILE_PATTERNS = [
   /errorboundary/i,
@@ -218,7 +218,7 @@ const getCriticalFlowCandidates = (projectData: ProjectData, projectName: string
   const files = [...projectData.files].sort((a, b) => (b.importance || 0) - (a.importance || 0));
 
   const orchestrators = files.slice(0, 4).map((f) => rootPath(f.path));
-  const entryPoints = files.filter((f) => ENTRY_FILE_NAMES.includes(f.name.toLowerCase())).map((f) => rootPath(f.path));
+  const entryPoints = files.filter((f) => isEntryPointFile(f.path, f.name)).map((f) => rootPath(f.path));
   const services = files.filter((f) => /service|domain|controller|manager|core/i.test(f.name) || /services|domain|controllers/i.test(f.path)).slice(0, 4).map((f) => rootPath(f.path));
 
   const flows = [];
@@ -292,9 +292,8 @@ export const generateAIContextExport = (projectData: ProjectData, projectName: s
     }
 
     const lowerPath = file.path.toLowerCase();
-    const lowerName = file.name.toLowerCase();
 
-    if (ENTRY_FILE_NAMES.includes(lowerName)) {
+    if (isEntryPointFile(file.path, file.name)) {
       entryPoints.push(file.path);
     }
 
@@ -312,36 +311,6 @@ export const generateAIContextExport = (projectData: ProjectData, projectName: s
     .slice(0, 5)
     .map(([ext, count]) => `${ext} (${count})`);
 
-  const detectedCapabilities = new Set<string>();
-  projectData.files.forEach((file) => {
-    const code = file.content.toLowerCase();
-    if (code.includes('generateerrorcontextpack') || code.includes('error-to-context')) detectedCapabilities.add('Error-to-Context Pack');
-    if (code.includes('generatetaskpack') || code.includes('task pack')) detectedCapabilities.add('Task Pack Builder');
-    if (code.includes('generatesemanticsearchresults') || code.includes('semantic search')) detectedCapabilities.add('Semantic Search');
-    if (code.includes('generateimpactanalysisdata') || code.includes('predictive impact')) detectedCapabilities.add('Predictive Impact Analysis');
-    if (code.includes('buildsmartdiffdata') || code.includes('smart diff')) detectedCapabilities.add('Smart Diff Context');
-    if (code.includes('projectmemory') || code.includes('setprojectglobalmemory') || code.includes('setprojectfilememory')) detectedCapabilities.add('Project Memory');
-    if (code.includes('generateaivisiondocument') || code.includes('generateaiarchitecturenarrative') || code.includes('generateairefactorpriorities')) detectedCapabilities.add('AI Handoff Documents');
-    if (code.includes('generateaicontext')) detectedCapabilities.add('Architectural Snapshot Export');
-  });
-
-  const capabilityList = Array.from(detectedCapabilities);
-  const productCoreFiles = projectData.files.filter((file) => {
-    const lowerPath = file.path.toLowerCase();
-    return (
-      lowerPath.endsWith('src/app.tsx') ||
-      lowerPath.endsWith('src/store/useprojectstore.ts') ||
-      lowerPath.endsWith('src/utils/analysis.ts') ||
-      lowerPath.endsWith('main.py') ||
-      lowerPath.endsWith('server/index.js')
-    );
-  });
-  const productCoreFileList = productCoreFiles.map((file) => rootPath(file.path));
-  const topNodes = [...projectData.nodes]
-    .sort((a, b) => (b.data.importance || 0) - (a.data.importance || 0))
-    .slice(0, SNAPSHOT_EXPORT_CONFIG.maxHotspots);
-  const hotspotSemantics = topNodes.map((node) => summarizeFileSemantics(node.data));
-  const topHotspots = topNodes.map((node) => `${node.label} (${rootPath(node.id)}) [${node.data.importance}]`);
   const connectionMap = new Map<string, { outgoing: string[]; incoming: string[] }>();
 
   projectData.nodes.forEach((node) => {
@@ -363,6 +332,31 @@ export const generateAIContextExport = (projectData: ProjectData, projectName: s
       connectionMap.get(targetId)!.incoming.push(sourceLabel);
     }
   });
+
+  const topNodes = [...projectData.nodes]
+    .sort((a, b) => {
+      const impA = a.data.importance || 0;
+      const impB = b.data.importance || 0;
+      if (impB !== impA) return impB - impA;
+
+      const connA = connectionMap.get(a.id);
+      const connB = connectionMap.get(b.id);
+      const totalA = connA ? connA.outgoing.length + connA.incoming.length : 0;
+      const totalB = connB ? connB.outgoing.length + connB.incoming.length : 0;
+      if (totalB !== totalA) return totalB - totalA;
+
+      const semA = summarizeFileSemantics(a.data);
+      const semB = summarizeFileSemantics(b.data);
+      const linesA = semA.nonEmptyLines || semA.lines || a.data.size || 0;
+      const linesB = semB.nonEmptyLines || semB.lines || b.data.size || 0;
+      if (linesB !== linesA) return linesB - linesA;
+
+      return a.label.localeCompare(b.label);
+    })
+    .slice(0, SNAPSHOT_EXPORT_CONFIG.maxHotspots);
+
+  const hotspotSemantics = topNodes.map((node) => summarizeFileSemantics(node.data));
+  const topHotspots = topNodes.map((node) => `${node.label} (${rootPath(node.id)}) [${node.data.importance}]`);
 
   const graphLeaders = [...projectData.nodes]
     .map((node) => {
@@ -389,20 +383,17 @@ export const generateAIContextExport = (projectData: ProjectData, projectName: s
   });
 
   const inferredPurpose = [
-    capabilityList.length > 0 ? 'extraer contexto arquitectónico accionable para desarrolladores y agentes' : null,
-    capabilityList.includes('Task Pack Builder') ? 'armar handoffs cortos y task packs por intención' : null,
-    capabilityList.includes('Error-to-Context Pack') ? 'convertir errores en contexto corto de depuración' : null,
-    capabilityList.includes('Semantic Search') ? 'ubicar módulos por propósito y no solo por nombre' : null,
-    capabilityList.includes('Predictive Impact Analysis') ? 'anticipar impacto antes de modificar archivos' : null,
-    backendFiles.some((path) => path.endsWith('main.py')) ? 'backend FastAPI para análisis y orquestación de IA' : null
+    frontendFiles.length > 0 ? `proveer interfaz de usuario (${frontendFiles.length} componentes)` : null,
+    backendFiles.length > 0 ? `ejecutar servicios de backend (${backendFiles.length} módulos)` : null,
+    stack.has('Database (ORM/ODM)') ? 'gestionar persistencia y modelos de datos' : null,
+    projectData.links.length > 0 ? `orquestar flujos entre ${projectData.files.length} módulos analizados` : null
   ].filter(Boolean).join(', ');
 
   const architectureSummary = [
-    frontendFiles.length > 0 ? `Frontend detectado con ${frontendFiles.length} archivos principales de interfaz.` : null,
-    backendFiles.length > 0 ? `Backend detectado con ${backendFiles.length} archivos de lógica/servicio.` : null,
+    frontendFiles.length > 0 ? `Frontend detectado con ${frontendFiles.length} archivos principales.` : null,
+    backendFiles.length > 0 ? `Backend detectado con ${backendFiles.length} archivos de lógica y servicios.` : null,
     projectData.links.length > 0 ? `Se mapearon ${projectData.links.length} relaciones entre módulos.` : null,
-    topHotspots.length > 0 ? `Los hotspots más conectados son ${getTopItems(topHotspots, 4)}.` : null,
-    capabilityList.length > 0 ? `Las capacidades detectadas del producto son ${getTopItems(capabilityList, 8)}.` : null
+    topHotspots.length > 0 ? `Los hotspots más conectados son ${getTopItems(topHotspots, 4)}.` : null
   ].filter(Boolean).join(' ');
 
   const layerEntries = Object.entries(
@@ -441,16 +432,18 @@ export const generateAIContextExport = (projectData: ProjectData, projectName: s
   context += '- Hechos verificables: entry points detectados, tipos de archivo, relaciones del grafo, conexiones entrantes/salientes, contratos extraídos por regex y métricas de tamaño.\n';
   context += '- Heurísticas: fuentes de verdad, flujos críticos, rol inferido del archivo y complejidad estimada.\n\n';
 
+  const explicitTargetIdentity = extractTargetProjectIdentity(projectData.files);
+
   context += '## Identidad del Proyecto\n';
-  context += `- Descripción: ${normalizedName} está orientado a ${inferredPurpose || 'extraer contexto estructural útil desde un repositorio local'}.\n`;
+  context += `- Descripción: ${explicitTargetIdentity ? `${normalizedName} (${explicitTargetIdentity})` : `${normalizedName} está orientado a ${inferredPurpose || 'ejecutar la lógica funcional del sistema analizado'}`}.\n`;
   context += `- Resumen arquitectónico: ${architectureSummary || 'No se pudo inferir un resumen arquitectónico fuerte con el conjunto actual de archivos.'}\n`;
   context += `- Entry points probables: ${getTopItems(formatProjectPaths(normalizedName, entryPoints), SNAPSHOT_EXPORT_CONFIG.maxEntryPoints)}\n`;
   context += `- Directorios principales: ${getTopItems(Array.from(directories), SNAPSHOT_EXPORT_CONFIG.maxDirectories)}\n`;
   context += `- Tipos de archivo dominantes: ${getTopItems(dominantExt, 5)}\n\n`;
 
   context += '## Capacidades Detectadas\n';
-  context += `- Capacidades base: ${getTopItems(capabilityList, 8)}\n`;
-  context += `- Archivos núcleo: ${getTopItems(productCoreFileList, SNAPSHOT_EXPORT_CONFIG.maxEntryPoints)}\n`;
+  context += `- Stack detectado: ${getTopItems(Array.from(stack), 8)}\n`;
+  context += `- Entry points núcleo: ${getTopItems(formatProjectPaths(normalizedName, entryPoints), SNAPSHOT_EXPORT_CONFIG.maxEntryPoints)}\n`;
   context += '- Estrategia: análisis determinístico primero y enriquecimiento con IA solo como capa opcional.\n\n';
 
   context += '## Restricciones de Lectura\n';
@@ -506,7 +499,17 @@ export const generateProjectBriefExport = (projectData: ProjectData, projectName
   const uiSignals = new Set<string>();
   const entryPoints: string[] = [];
   const hotspotFiles = [...projectData.files]
-    .sort((a, b) => (b.importance || 0) - (a.importance || 0))
+    .sort((a, b) => {
+      const impA = a.importance || 0;
+      const impB = b.importance || 0;
+      if (impB !== impA) return impB - impA;
+      const semA = summarizeFileSemantics(a);
+      const semB = summarizeFileSemantics(b);
+      const linesA = semA.nonEmptyLines || semA.lines || a.size || 0;
+      const linesB = semB.nonEmptyLines || semB.lines || b.size || 0;
+      if (linesB !== linesA) return linesB - linesA;
+      return a.name.localeCompare(b.name);
+    })
     .slice(0, 8);
 
   projectData.files.forEach((file) => {
@@ -519,7 +522,7 @@ export const generateProjectBriefExport = (projectData: ProjectData, projectName
     signals.runtime.forEach((item) => runtimeSignals.add(item));
     signals.ui.forEach((item) => uiSignals.add(item));
 
-    if (ENTRY_FILE_NAMES.includes(file.name.toLowerCase())) {
+    if (isEntryPointFile(file.path, file.name)) {
       entryPoints.push(file.path);
     }
   });
@@ -529,16 +532,18 @@ export const generateProjectBriefExport = (projectData: ProjectData, projectName
     .map(([language, count]) => `${language} (${count})`);
 
   const detectedPurpose = [
-    uiSignals.has('SPA Frontend') ? 'explorar visualmente la estructura de proyectos' : null,
-    runtimeSignals.has('Backend Python') || runtimeSignals.has('Backend Node') ? 'procesar y enriquecer el análisis con servicios locales' : null,
-    projectData.links.length > 0 ? 'mapear relaciones entre módulos' : null,
-    stack.has('PWA') ? 'funcionar como aplicación instalable' : null
+    uiSignals.size > 0 ? `proveer componentes de interfaz (${Array.from(uiSignals).join(', ')})` : null,
+    runtimeSignals.size > 0 ? `ejecutar servicios backend (${Array.from(runtimeSignals).join(', ')})` : null,
+    dbSignals.size > 0 ? `gestionar persistencia de datos (${Array.from(dbSignals).join(', ')})` : null,
+    projectData.files.length > 0 ? `organizar la estructura técnica en ${projectData.files.length} módulos` : null
   ].filter(Boolean).join(', ');
+
+  const explicitBriefIdentity = extractTargetProjectIdentity(projectData.files);
 
   let brief = `# Project Brief: ${projectName}\n\n`;
   brief += buildExportMetadataBlock(projectName, 'brief.md');
   brief += '## Qué Hace\n';
-  brief += `${projectName} parece estar diseñado para ${detectedPurpose || 'analizar código fuente y generar contexto reutilizable para agentes de programación'}.\n\n`;
+  brief += `${explicitBriefIdentity ? `${projectName}: ${explicitBriefIdentity}` : `${projectName} es un proyecto desarrollado para ${detectedPurpose || 'ejecutar la lógica funcional del sistema analizado'}.`}\n\n`;
   brief += '## Stack Detectado\n';
   brief += `- Frameworks y librerías: ${Array.from(stack).join(', ') || 'No detectado con alta confianza'}\n`;
   brief += `- Lenguajes principales: ${topLanguages.slice(0, 6).join(', ') || 'No detectado'}\n`;
@@ -554,7 +559,7 @@ export const generateProjectBriefExport = (projectData: ProjectData, projectName
   brief += '## Qué Pasarle A Otro Agente\n';
   brief += `- Este proyecto usa: ${topLanguages.slice(0, 4).join(', ') || 'lenguajes no detectados con claridad'}.\n`;
   brief += `- Componentes críticos: ${hotspotFiles.slice(0, 5).map((file) => withProjectRoot(projectName, file.path)).join(', ') || 'No detectados'}.\n`;
-  brief += '- Resumen operativo: carga archivos del proyecto, detecta dependencias, construye un grafo, genera snapshots y puede pedir una auditoría con IA si hay proveedor configurado.\n';
+  brief += `- Resumen operativo: estructura con ${projectData.files.length} módulos y ${projectData.links.length} relaciones entre componentes en ${topLanguages.slice(0, 3).join(', ')}.\n`;
 
   return brief;
 };
@@ -586,7 +591,17 @@ export const generateProjectMetadataExport = (projectData: ProjectData, projectN
   });
 
   const hotspots = [...projectData.files]
-    .sort((a, b) => (b.importance || 0) - (a.importance || 0))
+    .sort((a, b) => {
+      const impA = a.importance || 0;
+      const impB = b.importance || 0;
+      if (impB !== impA) return impB - impA;
+      const semA = summarizeFileSemantics(a);
+      const semB = summarizeFileSemantics(b);
+      const linesA = semA.nonEmptyLines || semA.lines || a.size || 0;
+      const linesB = semB.nonEmptyLines || semB.lines || b.size || 0;
+      if (linesB !== linesA) return linesB - linesA;
+      return a.name.localeCompare(b.name);
+    })
     .slice(0, 10)
     .map((file) => ({
       path: withProjectRoot(projectName, file.path),
@@ -609,7 +624,7 @@ export const generateProjectMetadataExport = (projectData: ProjectData, projectN
     databases: Array.from(databases),
     layers,
     entryPoints: projectData.files
-      .filter((file) => ENTRY_FILE_NAMES.includes(file.name.toLowerCase()))
+      .filter((file) => isEntryPointFile(file.path, file.name))
       .map((file) => withProjectRoot(projectName, file.path)),
     hotspots,
     sourcesOfTruth: getSourceOfTruthCandidates(projectData, projectName),

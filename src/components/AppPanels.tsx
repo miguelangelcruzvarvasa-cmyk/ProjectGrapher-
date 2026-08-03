@@ -6,12 +6,14 @@ import { AIConfig } from './AIConfig';
 import { Modal } from './Modal';
 import { GraphNode } from '../types';
 import { ProcessingProgress } from '../store/projectStore.types';
+import { PROJECT_ANALYSIS_RULES } from '../config/projectContext';
+import { pickProjectDirectory, supportsDirectoryPicker } from '../utils/directoryScan';
 
 type EmptyProjectStateProps = {
   cn: (...inputs: any[]) => string;
   isProcessing: boolean;
   processingProgress: ProcessingProgress;
-  onProcessFiles: (files: FileList) => void;
+  onProcessFiles: (files: FileList | File[]) => void;
   appMode?: 'multi_repo_shield' | 'single_repo';
   setAppMode?: (mode: 'multi_repo_shield' | 'single_repo') => void;
 };
@@ -35,6 +37,24 @@ export function EmptyProjectState({
 }: EmptyProjectStateProps) {
   const progressPercent = Math.min(100, Math.max(6, Math.round((processingProgress.ratio || 0) * 100)));
   const progressStageLabel = PROCESSING_STAGE_LABELS[processingProgress.stage] || 'Procesando';
+  const fallbackInputRef = React.useRef<HTMLInputElement>(null);
+  const [isPickingFolder, setIsPickingFolder] = React.useState(false);
+
+  const handleSelectFolder = async () => {
+    if (supportsDirectoryPicker()) {
+      setIsPickingFolder(true);
+      try {
+        const picked = await pickProjectDirectory(PROJECT_ANALYSIS_RULES.ignoredDirectories);
+        if (picked) onProcessFiles(picked.files);
+      } finally {
+        setIsPickingFolder(false);
+      }
+      return;
+    }
+    fallbackInputRef.current?.click();
+  };
+
+  const isBusy = isProcessing || isPickingFolder;
 
   return (
     <div className="relative flex min-h-screen items-center justify-center overflow-hidden bg-brand-bg p-4 sm:p-6">
@@ -53,7 +73,7 @@ export function EmptyProjectState({
         </div>
       )}
 
-      {isProcessing && (
+      {isBusy && (
         <div className="pointer-events-none absolute inset-0 z-20 flex items-center justify-center bg-brand-bg/72 px-4 backdrop-blur-sm">
           <div className="w-full max-w-xl rounded-[2rem] border border-brand-primary/20 bg-[#07101d]/95 p-6 text-left shadow-[0_30px_100px_rgba(0,0,0,0.45)] sm:p-7">
             <div className="flex items-start gap-4">
@@ -62,13 +82,18 @@ export function EmptyProjectState({
               </div>
               <div className="min-w-0 flex-1">
                 <div className="text-[10px] font-black uppercase tracking-[0.24em] text-brand-primary">Motor Local Activo</div>
-                <h2 className="mt-2 text-2xl font-bold text-white">Analizando proyecto...</h2>
+                <h2 className="mt-2 text-2xl font-bold text-white">
+                  {isPickingFolder && !isProcessing ? 'Leyendo carpeta...' : 'Analizando proyecto...'}
+                </h2>
                 <p className="mt-2 text-sm leading-relaxed text-gray-300">
-                  {processingProgress.message || 'Procesando estructura, dependencias y contexto del proyecto.'}
+                  {isPickingFolder && !isProcessing
+                    ? 'Recorriendo el árbol de archivos y descartando node_modules, .git y similares. En carpetas grandes esto puede tardar varios segundos.'
+                    : (processingProgress.message || 'Procesando estructura, dependencias y contexto del proyecto.')}
                 </p>
               </div>
             </div>
 
+            {!isPickingFolder && (
             <div className="mt-6 space-y-3">
               <div className="flex items-center justify-between gap-4 text-[11px] uppercase tracking-[0.18em]">
                 <span className="font-black text-cyan-300">{progressStageLabel}</span>
@@ -91,6 +116,7 @@ export function EmptyProjectState({
                 </div>
               )}
             </div>
+            )}
           </div>
         </div>
       )}
@@ -134,17 +160,21 @@ export function EmptyProjectState({
         <div className="flex flex-col items-center gap-6">
           <div className="relative max-w-sm group w-full">
             <div className="absolute -inset-1 bg-gradient-to-r from-brand-primary to-brand-secondary rounded-2xl blur opacity-25 group-hover:opacity-50 transition duration-500" />
-            <label
+            <div
+              role="button"
+              tabIndex={0}
+              onClick={() => { if (!isBusy) void handleSelectFolder(); }}
+              onKeyDown={(e) => { if (!isBusy && (e.key === 'Enter' || e.key === ' ')) void handleSelectFolder(); }}
               className={cn(
                 'relative flex cursor-pointer flex-col items-center justify-center rounded-2xl border-2 border-dashed p-8 transition-all duration-300 sm:p-10 lg:p-12',
                 'bg-brand-surface/50 border-gray-800 hover:border-brand-primary/50 hover:bg-brand-surface/80',
-                isProcessing && 'pointer-events-none'
+                isBusy && 'pointer-events-none'
               )}
             >
-              {isProcessing ? (
+              {isBusy ? (
                 <div className="flex flex-col items-center gap-4">
                   <Loader2 className="w-12 h-12 text-brand-primary animate-spin" />
-                  <p className="text-lg font-medium text-white">Indexando Carpeta...</p>
+                  <p className="text-lg font-medium text-white">{isPickingFolder && !isProcessing ? 'Leyendo carpeta...' : 'Indexando Carpeta...'}</p>
                   <div className="flex items-center gap-2 px-3 py-1 bg-brand-primary/10 border border-brand-primary/20 rounded-full">
                     <Database className="w-3 h-3 text-brand-primary" />
                     <span className="text-[10px] font-bold text-brand-primary uppercase tracking-widest">Motor Local Activo (Sin IA)</span>
@@ -154,7 +184,9 @@ export function EmptyProjectState({
                 <>
                   <Upload className="w-12 h-12 text-gray-500 mb-4 group-hover:text-brand-primary transition-colors" />
                   <p className="mb-2 text-base font-medium text-white sm:text-lg">Seleccionar Carpeta</p>
+                  <p className="text-xs text-gray-500">node_modules, .git, dist y similares se descartan antes de leerse</p>
                   <input
+                    ref={fallbackInputRef}
                     type="file"
                     className="hidden"
                     // @ts-ignore
@@ -165,7 +197,7 @@ export function EmptyProjectState({
                   />
                 </>
               )}
-            </label>
+            </div>
           </div>
 
           {setAppMode && (

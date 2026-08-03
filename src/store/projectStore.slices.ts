@@ -372,7 +372,12 @@ export const createProjectSlice = (set: SetState, get: GetState) => ({
 
       const nextGraph = buildDeepAnalysisGraph(projectData, data.analysis);
       set({
-        projectData: { ...projectData, nodes: nextGraph.nodes, links: nextGraph.links },
+        projectData: {
+          ...projectData,
+          nodes: nextGraph.nodes,
+          links: nextGraph.links,
+          files: nextGraph.files || projectData.files
+        },
         processingProgress: {
           stage: 'deep-analysis',
           message: 'Aplicando refinamiento final y preparando la vista del proyecto...',
@@ -410,7 +415,7 @@ export const createProjectSlice = (set: SetState, get: GetState) => ({
     set({ projectData: lastProject.data, projectName: lastProject.name || '' });
     await get().refreshSmartDiff();
   },
-  processFiles: async (fileList: FileList) => {
+  processFiles: async (fileList: FileList | File[]) => {
     const runId = ++activeAnalysisRunId;
     activeAnalysisWorker?.terminate();
     activeAnalysisWorker = null;

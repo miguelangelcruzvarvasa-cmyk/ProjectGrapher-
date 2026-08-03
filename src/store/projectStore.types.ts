@@ -174,7 +174,7 @@ export interface ProjectState {
   setShowFileModal: (show: boolean) => void;
   setShowIAModal: (show: boolean) => void;
   checkEnvKeys: () => Promise<void>;
-  processFiles: (files: FileList) => Promise<void>;
+  processFiles: (files: FileList | File[]) => Promise<void>;
   performDeepAnalysis: () => Promise<void>;
   loadLastProject: () => Promise<void>;
   generateAIReview: () => Promise<void>;

@@ -423,6 +423,51 @@ export const buildAIAgentHandoff = (projectName: string, aiReview: string, taskP
   return text;
 };
 
+export const isEntryPointFile = (path: string, fileName: string): boolean => {
+  const lowerPath = path.toLowerCase().replace(/\\/g, '/');
+  const lowerName = fileName.toLowerCase();
+
+  // Angular standalone & classic entry points
+  if (
+    lowerPath.endsWith('main.ts') ||
+    lowerPath.endsWith('app.component.ts') ||
+    lowerPath.endsWith('app.routes.ts') ||
+    lowerPath.endsWith('app.config.ts') ||
+    lowerPath.endsWith('app.module.ts') ||
+    lowerPath.endsWith('app.tsx') ||
+    lowerPath.endsWith('main.tsx') ||
+    lowerPath.includes('app.routes.') ||
+    lowerPath.includes('app.config.')
+  ) {
+    return true;
+  }
+
+  // Laravel / PHP entry points & routes
+  if (
+    lowerPath.endsWith('bootstrap/app.php') ||
+    lowerPath.endsWith('public/index.php') ||
+    lowerPath.endsWith('routes/api.php') ||
+    lowerPath.endsWith('routes/web.php') ||
+    lowerPath.endsWith('routes/console.php') ||
+    lowerPath.endsWith('artisan')
+  ) {
+    return true;
+  }
+
+  // Common framework entry point filenames
+  const ENTRY_EXACT_NAMES = new Set([
+    'main.ts', 'main.tsx', 'main.jsx', 'main.js',
+    'app.ts', 'app.tsx', 'app.jsx', 'app.js', 'app.vue', 'app.svelte', 
+    'app.component.ts', 'app.routes.ts', 'app.config.ts', 'app.module.ts',
+    'main.py', 'app.py', 'wsgi.py', 'asgi.py', 'manage.py', 'server.py',
+    'server.js', 'server.ts', 'index.js', 'index.ts', 'index.tsx', 'index.jsx', 'index.php',
+    'main.dart', 'program.cs', 'startup.cs', 'application.java', 'main.java',
+    'main.go', 'main.rs', 'artisan', 'api.php', 'web.php'
+  ]);
+
+  return ENTRY_EXACT_NAMES.has(lowerName);
+};
+
 export const extractProjectInsights = (projectData: ProjectData, projectName: string): ProjectInsights => {
   const stack = new Set<string>();
   const directories = new Set<string>();
@@ -448,8 +493,7 @@ export const extractProjectInsights = (projectData: ProjectData, projectName: st
     if (!layerMap.has(layer)) layerMap.set(layer, []);
     if (layerMap.get(layer)!.length < 12) layerMap.get(layer)!.push(file.name);
 
-    const lowerName = file.name.toLowerCase();
-    if (['main.tsx', 'main.jsx', 'app.tsx', 'app.jsx', 'main.py', 'server.js', 'index.js', 'index.ts'].includes(lowerName)) {
+    if (isEntryPointFile(file.path, file.name)) {
       entryPoints.push(file.path);
     }
   });
@@ -467,7 +511,25 @@ export const extractProjectInsights = (projectData: ProjectData, projectName: st
   });
 
   const topHotspots = [...projectData.nodes]
-    .sort((a, b) => (b.data.importance || 0) - (a.data.importance || 0))
+    .sort((a, b) => {
+      const impA = a.data.importance || 0;
+      const impB = b.data.importance || 0;
+      if (impB !== impA) return impB - impA;
+
+      const connA = connectionMap.get(a.id);
+      const connB = connectionMap.get(b.id);
+      const totalA = connA ? connA.outgoing.length + connA.incoming.length : 0;
+      const totalB = connB ? connB.outgoing.length + connB.incoming.length : 0;
+      if (totalB !== totalA) return totalB - totalA;
+
+      const semA = summarizeFileSemantics(a.data);
+      const semB = summarizeFileSemantics(b.data);
+      const linesA = semA.nonEmptyLines || semA.lines || a.data.size || 0;
+      const linesB = semB.nonEmptyLines || semB.lines || b.data.size || 0;
+      if (linesB !== linesA) return linesB - linesA;
+
+      return a.label.localeCompare(b.label);
+    })
     .slice(0, 10)
     .map((node) => {
       const semantic = summarizeFileSemantics(node.data);
@@ -533,9 +595,10 @@ export const extractProjectInsights = (projectData: ProjectData, projectName: st
 
 export const buildExecutiveContext = (insights: ProjectInsights, filesCount: number, linksCount: number, aiReview?: string | null) => {
   const highlights = extractAIHighlightsForIntent(aiReview || null, 'vision', 4);
+  const stackText = insights.stack.length ? insights.stack.join(', ') : 'módulos de software';
   let text = `# Executive View: ${insights.projectName}\n\n`;
   text += `## Qué Hace\n`;
-  text += `${insights.projectName} es un proyecto orientado a entregar contexto arquitectónico accionable para desarrolladores y agentes de programación.\n\n`;
+  text += `${insights.projectName} es un proyecto compuesto por ${filesCount} archivos analizados y ${linksCount} relaciones entre módulos (${stackText}), distribuidos en ${insights.directories.length || 1} directorios principales.\n\n`;
   text += `## Resumen Rápido\n`;
   text += `- **Archivos analizados**: ${filesCount}\n`;
   text += `- **Relaciones detectadas**: ${linksCount}\n`;
@@ -857,12 +920,12 @@ export const buildTaskPack = (projectData: ProjectData, insights: ProjectInsight
     text += `- Ninguno detectado\n`;
   }
 
-  text += `\n## NO Tocar\n`;
+  text += `\n## Archivos Secundarios / Fuera de Foco\n`;
   if (irrelevantFiles.length) {
     text += `- ${irrelevantFiles.join(', ')}\n`;
-    text += `- Cualquier archivo no listado arriba es probablemente irrelevante para esta tarea\n`;
+    text += `- Se sugiere revisar estos archivos solo como referencia secundaria para esta tarea.\n`;
   } else {
-    text += `- Todos los archivos parecen potencialmente relevantes\n`;
+    text += `- Todos los archivos parecen potencialmente relevantes.\n`;
   }
 
   text += `\n## Orden\n`;
@@ -873,7 +936,7 @@ export const buildTaskPack = (projectData: ProjectData, insights: ProjectInsight
   text += `\n## Instrucciones\n`;
   text += `1. Lee los archivos primarios primero\n`;
   text += `2. Solo abre relacionados si necesitas dependencias\n`;
-  text += `3. No modifiques archivos fuera de esta lista sin verificar impacto\n`;
+  text += `3. Verifica el impacto antes de modificar la lógica compartida\n`;
   if (baseTerms.length) {
     text += `4. Términos guía: ${baseTerms.join(', ')}\n`;
   }
@@ -886,7 +949,47 @@ export const buildTaskPack = (projectData: ProjectData, insights: ProjectInsight
   return text;
 };
 
+export const extractTargetProjectIdentity = (files: ProjectFile[]): string | null => {
+  let description: string | null = null;
+
+  for (const file of files) {
+    const lowerName = file.name.toLowerCase();
+    if (lowerName === 'package.json' || lowerName === 'composer.json') {
+      try {
+        const data = JSON.parse(file.content);
+        if (data.description && typeof data.description === 'string' && data.description.trim()) {
+          description = data.description.trim();
+          break;
+        }
+      } catch {
+        // ignore parse error
+      }
+    }
+  }
+
+  if (!description) {
+    for (const file of files) {
+      const lowerName = file.name.toLowerCase();
+      if (lowerName === 'readme.md' || lowerName === 'readme.txt') {
+        const textLines = file.content
+          .split('\n')
+          .map((line) => line.trim())
+          .filter((line) => line.length > 0 && !line.startsWith('```') && !line.startsWith('!') && !line.startsWith('['));
+        
+        const candidate = textLines.find((line) => !line.startsWith('#') && line.length > 20);
+        if (candidate) {
+          description = candidate;
+          break;
+        }
+      }
+    }
+  }
+
+  return description;
+};
+
 export const buildErrorContextPackData = (projectData: ProjectData, insights: ProjectInsights, rawErrorInput: string): ErrorContextPackData | null => {
+  const isErrorInputProvided = Boolean(rawErrorInput.trim());
   const effectiveError = rawErrorInput.trim() || 'Sin error activo proporcionado. Este pack sirve como plantilla base de depuración.';
   const rootPath = (path: string) => withProjectRoot(insights.projectName, path);
   const rawError = effectiveError;
@@ -896,9 +999,9 @@ export const buildErrorContextPackData = (projectData: ProjectData, insights: Pr
     .find(Boolean)
     ?.slice(0, 180) || 'Error no especificado';
 
-  const stackPaths = extractStackPathHints(rawError);
+  const stackPaths = isErrorInputProvided ? extractStackPathHints(rawError) : [];
   const stackBasenames = uniqueStrings(stackPaths.map((item) => getPathBasename(item)));
-  const baseTerms = tokenizeTask(rawError);
+  const baseTerms = isErrorInputProvided ? tokenizeTask(rawError) : [];
   const expandedTerms = uniqueStrings(expandTaskTerms([...baseTerms, ...stackBasenames.map((item) => item.replace(/\.[^.]+$/, ''))]));
   const matchedSignals = uniqueStrings([
     ...stackPaths.map((item) => `stack:${item}`),
@@ -978,14 +1081,14 @@ export const buildErrorContextPackData = (projectData: ProjectData, insights: Pr
   });
 
   const rankedFiles = scoredFiles.sort((a, b) => b.score - a.score);
-  const bestMatch = rankedFiles[0];
-  const probableOrigin: ErrorContextFileCandidate | null = bestMatch
+  const bestMatch = (isErrorInputProvided && (stackPaths.length > 0 || expandedTerms.length > 0)) ? rankedFiles[0] : null;
+  const probableOrigin: ErrorContextFileCandidate | null = (bestMatch && bestMatch.reasons.length > 0)
     ? {
         path: rootPath(bestMatch.file.path),
         nodeId: bestMatch.file.id,
         importance: bestMatch.file.importance || 0,
         score: bestMatch.score,
-        reasons: bestMatch.reasons.slice(0, 4).length ? bestMatch.reasons.slice(0, 4) : ['Archivo priorizado por relevancia estructural'],
+        reasons: bestMatch.reasons.slice(0, 4),
         relation: stackPaths.length || expandedTerms.length ? 'origin' : 'hotspot'
       }
     : null;

@@ -2,10 +2,10 @@ export const PROJECT_ANALYSIS_RULES = {
   allowedExtensions: [
     '.js', '.jsx', '.ts', '.tsx', '.py', '.rb', '.go', '.rs', '.java',
     '.c', '.cpp', '.h', '.cs', '.php', '.swift', '.html', '.css',
-    '.scss', '.sass', '.less', '.vue', '.svelte', '.dart'
+    '.scss', '.sass', '.less', '.vue', '.svelte', '.dart', '.json', '.md'
   ],
   ignoredDirectories: [
-    'node_modules', '.git', '.claude', '.angular', 'worktrees', 'worktree', '.worktrees', '.worktree',
+    'node_modules', '.git', '.angular', 'worktrees', 'worktree', '.worktrees', '.worktree',
     'dist', 'build', 'out', 'target', 'venv', '.venv', 'env', '.env',
     'virtualenv', '.virtualenv', '__pycache__', '.pytest_cache', '.mypy_cache',
     '.ruff_cache', 'site-packages', 'dist-packages', 'pip-packages', 'Lib', 'lib64',
@@ -18,14 +18,18 @@ export const PROJECT_ANALYSIS_RULES = {
     'assets', 'static', 'public', 'images', 'img', 'media', 'fonts', 'locales',
     'i18n', 'screenshots', 'videos', 'uploads', 'backups',
     'docs', 'documentation', '__tests__', 'tests', 'test', 'spec', 'e2e',
-    '.dart_tool'
+    '.dart_tool',
+    // Carpetas de config de asistentes/agentes de IA y editores (no son código del proyecto)
+    '.claude', '.cursor', '.windsurf', '.continue', '.aider', '.aider.tags.cache.v3',
+    '.copilot', '.github-copilot', '.zed', '.trae', '.codeium', '.amazonq', '.qodo',
+    '.mimocode', '.vs', '.history'
   ],
   ignoredFiles: [
     'package-lock.json', 'yarn.lock', 'pnpm-lock.yaml',
     'composer.lock', 'Gemfile.lock', '.DS_Store', 'thumbs.db',
     '.env', '.env.local', '.env.development.local', 'pip-log.txt',
     'npm-debug.log', 'yarn-debug.log', 'yarn-error.log',
-    'README.md', 'LICENSE', 'CONTRIBUTING.md', 'CHANGELOG.md',
+    'LICENSE', 'CONTRIBUTING.md', 'CHANGELOG.md',
     'pubspec.lock'
   ],
   maxFileSizeBytes: 1024 * 1024

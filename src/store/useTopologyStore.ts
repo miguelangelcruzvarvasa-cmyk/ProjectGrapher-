@@ -4,6 +4,37 @@ import { shouldProcessTopologyFile, detectRepoType, extractBackendEndpoints, ext
 import { buildTopologyContracts } from '../utils/topologyGraph';
 import { generateAgentShieldPack } from '../utils/shieldGenerator';
 import { DEMO_REPOSITORIES } from '../utils/demoData';
+import { db } from '../db/projectDB';
+
+// Se guarda siempre en el mismo registro (id fijo): el workspace multi-repo
+// es una sola sesión de trabajo, no un historial de proyectos con nombre.
+const TOPOLOGY_WORKSPACE_ID = 1;
+
+const persistWorkspace = (state: {
+  repositories: Repository[];
+  files: ProjectFile[];
+  endpoints: ApiEndpoint[];
+  apiCalls: FrontendApiCall[];
+  contractLinks: ContractLink[];
+  nodes: TopologyNode[];
+  graphLinks: TopologyLink[];
+  agentTask: string;
+}) => {
+  void db.topologyWorkspaces.put({
+    id: TOPOLOGY_WORKSPACE_ID,
+    timestamp: Date.now(),
+    repositories: state.repositories,
+    // El contenido crudo no se usa después del escaneo inicial; no vale la pena
+    // persistirlo (menos peso en IndexedDB, alineado con no guardar código fuente de más).
+    files: state.files.map(({ content: _content, ...rest }) => rest),
+    endpoints: state.endpoints,
+    apiCalls: state.apiCalls,
+    contractLinks: state.contractLinks,
+    nodes: state.nodes,
+    graphLinks: state.graphLinks,
+    agentTask: state.agentTask
+  });
+};
 
 interface TopologyState {
   repositories: Repository[];
@@ -20,10 +51,11 @@ interface TopologyState {
   
   setAgentTask: (task: string) => void;
   setActiveTab: (tab: TopologyState['activeTab']) => void;
-  addRepositoryFiles: (repoName: string, fileList: FileList) => Promise<void>;
+  addRepositoryFiles: (repoName: string, fileList: FileList | File[]) => Promise<void>;
   removeRepository: (repoId: string) => void;
   updateRepoType: (repoId: string, type: Repository['type']) => void;
   loadDemoData: () => void;
+  loadLastTopology: () => Promise<void>;
   generateShield: () => void;
   clearWorkspace: () => void;
   exportTopologyJson: () => string;
@@ -45,16 +77,34 @@ export const useTopologyStore = create<TopologyState>((set, get) => ({
   setAgentTask: (agentTask) => set({ agentTask }),
   setActiveTab: (activeTab) => set({ activeTab }),
 
-  clearWorkspace: () => set({
-    repositories: [],
-    files: [],
-    endpoints: [],
-    apiCalls: [],
-    contractLinks: [],
-    nodes: [],
-    graphLinks: [],
-    shieldPack: null
-  }),
+  clearWorkspace: () => {
+    void db.topologyWorkspaces.delete(TOPOLOGY_WORKSPACE_ID);
+    set({
+      repositories: [],
+      files: [],
+      endpoints: [],
+      apiCalls: [],
+      contractLinks: [],
+      nodes: [],
+      graphLinks: [],
+      shieldPack: null
+    });
+  },
+
+  loadLastTopology: async () => {
+    const saved = await db.topologyWorkspaces.get(TOPOLOGY_WORKSPACE_ID);
+    if (!saved) return;
+    set({
+      repositories: saved.repositories,
+      files: saved.files.map((f) => ({ ...f, content: '' })),
+      endpoints: saved.endpoints,
+      apiCalls: saved.apiCalls,
+      contractLinks: saved.contractLinks,
+      nodes: saved.nodes,
+      graphLinks: saved.graphLinks,
+      agentTask: saved.agentTask || get().agentTask
+    });
+  },
 
   updateRepoType: (repoId, type) => {
     const colorMap: Record<Repository['type'], string> = {
@@ -72,6 +122,7 @@ export const useTopologyStore = create<TopologyState>((set, get) => ({
 
     const { links, nodes, graphLinks } = buildTopologyContracts(updatedRepos, get().endpoints, get().apiCalls);
     set({ repositories: updatedRepos, contractLinks: links, nodes, graphLinks });
+    persistWorkspace(get());
   },
 
   loadDemoData: () => {
@@ -120,6 +171,7 @@ export const useTopologyStore = create<TopologyState>((set, get) => ({
       nodes,
       graphLinks
     });
+    persistWorkspace(get());
   },
 
   addRepositoryFiles: async (rawRepoName, fileList) => {
@@ -215,6 +267,7 @@ export const useTopologyStore = create<TopologyState>((set, get) => ({
       graphLinks,
       isScanning: false
     });
+    persistWorkspace(get());
   },
 
   generateShield: () => {

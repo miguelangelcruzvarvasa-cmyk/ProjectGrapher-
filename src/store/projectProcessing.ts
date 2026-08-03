@@ -116,7 +116,7 @@ type DeepAnalysisResult = {
 };
 
 export const prepareProjectFilesForWorker = async (
-  fileList: FileList,
+  fileList: FileList | File[],
   onProgress?: (progress: ProgressPayload) => void
 ) => {
   const totalFiles = fileList.length;
@@ -245,17 +245,26 @@ export const buildDeepAnalysisGraph = (projectData: ProjectData, analysisResults
     importanceMap[targetId] = (importanceMap[targetId] || 0) + 1;
   });
 
+  const newFiles = projectData.files.map((file) => ({
+    ...file,
+    importance: importanceMap[file.id] || 0
+  }));
+
   const newNodes: GraphNode[] = projectData.nodes.map((node) => ({
     ...node,
     size: Math.max(
       NODE_MIN_SIZE,
       Math.min(NODE_MAX_SIZE, NODE_BASE_SIZE + (importanceMap[node.id] || 0) * NODE_IMPORTANCE_WEIGHT)
     ),
-    data: { ...node.data, importance: importanceMap[node.id] || 0 }
+    data: {
+      ...node.data,
+      importance: importanceMap[node.id] || 0
+    }
   }));
 
   return {
     links: newLinks,
-    nodes: newNodes
+    nodes: newNodes,
+    files: newFiles
   };
 };

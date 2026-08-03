@@ -14,8 +14,11 @@ from dotenv import load_dotenv
 
 # SDKs de IA y Análisis
 from google import genai
+from google.genai import types as genai_types
 from openai import AsyncOpenAI, AuthenticationError, BadRequestError, RateLimitError, APIConnectionError
 import jedi
+
+AI_REQUEST_TIMEOUT_SECONDS = float(os.getenv("AI_REQUEST_TIMEOUT_SECONDS", "60"))
 
 # --- CONFIGURACIÓN DE LOGS ---
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -125,7 +128,7 @@ class DeepAnalyzer:
             if ext == 'py':
                 # Motor Jedi para Python (AST Real)
                 script = jedi.Script(content, path=path if path else None)
-                for imp in script.get_names(all_scopes=True, definitions=False):
+                for imp in script.get_names(all_scopes=True, definitions=True):
                     if imp.type == 'module':
                         deps.append(imp.full_name)
             
@@ -291,10 +294,13 @@ Reglas importantes para este análisis:
             api_key = request.customKey or os.getenv("GEMINI_API_KEY")
             if not api_key or api_key == "TU_GEMINI_API_KEY":
                 raise HTTPException(status_code=400, detail="API Key de Gemini no configurada correctamente")
-            
-            client = genai.Client(api_key=api_key)
+
+            client = genai.Client(
+                api_key=api_key,
+                http_options=genai_types.HttpOptions(timeout=int(AI_REQUEST_TIMEOUT_SECONDS * 1000))
+            )
             try:
-                response = client.models.generate_content(
+                response = await client.aio.models.generate_content(
                     model=selected_model,
                     contents=full_prompt
                 )
@@ -309,15 +315,12 @@ Reglas importantes para este análisis:
         env_key_name = f"{request.provider.upper()}_API_KEY"
         api_key = request.customKey or os.getenv(env_key_name)
         
-        # Validar si la llave es un placeholder o está vacía
-        if not api_key or api_key.startswith("TU_"):
-            if request.provider != AIProvider.OLLAMA:
-                logger.warning(f"No se encontró API Key válida para {request.provider} (usando {env_key_name} o CustomKey)")
-                # Si no hay llave, intentamos usar 'ollama' solo si es ollama, de lo contrario fallar temprano
-                if request.provider != AIProvider.OLLAMA:
-                    raise HTTPException(status_code=401, detail=f"API Key faltante o inválida para {request.provider}")
+        # Validar si la llave es un placeholder o está vacía (Ollama no requiere llave)
+        if (not api_key or api_key.startswith("TU_")) and request.provider != AIProvider.OLLAMA:
+            logger.warning(f"No se encontró API Key válida para {request.provider} (usando {env_key_name} o CustomKey)")
+            raise HTTPException(status_code=401, detail=f"API Key faltante o inválida para {request.provider}")
 
-        client = AsyncOpenAI(api_key=api_key or "ollama", base_url=base_url)
+        client = AsyncOpenAI(api_key=api_key or "ollama", base_url=base_url, timeout=AI_REQUEST_TIMEOUT_SECONDS)
         try:
             logger.info(f"Enviando solicitud a {request.provider} ({base_url})")
             response = await client.chat.completions.create(

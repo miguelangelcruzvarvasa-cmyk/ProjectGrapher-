@@ -127,7 +127,11 @@ self.onmessage = async (e: MessageEvent<{ files: { path: string, file: File, siz
     }
   }
 
-  // 3. Create Nodes
+  // 3. Update file importance and create Nodes
+  validFiles.forEach(f => {
+    f.importance = importanceMap[f.id] || 0;
+  });
+
   const nodes: GraphNode[] = validFiles.map(f => {
     const cluster = getClusterName(f.path);
     

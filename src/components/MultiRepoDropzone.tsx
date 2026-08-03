@@ -2,11 +2,30 @@ import React, { useRef, useState } from 'react';
 import { useTopologyStore } from '../store/useTopologyStore';
 import { FolderPlus, Layers, Trash2, Cpu, CheckCircle2, ShieldCheck, Loader2, Search, X } from 'lucide-react';
 import type { Repository } from '../types/topology';
+import { TOPOLOGY_ANALYSIS_RULES } from '../config/rules';
+import { pickProjectDirectory, supportsDirectoryPicker } from '../utils/directoryScan';
 
 export const MultiRepoDropzone: React.FC = () => {
   const { repositories, addRepositoryFiles, removeRepository, updateRepoType, clearWorkspace, isScanning } = useTopologyStore();
   const folderInputRef = useRef<HTMLInputElement>(null);
   const [filterTerm, setFilterTerm] = useState('');
+  const [isPickingFolder, setIsPickingFolder] = useState(false);
+
+  const handleAddRepository = async () => {
+    if (supportsDirectoryPicker()) {
+      setIsPickingFolder(true);
+      try {
+        const picked = await pickProjectDirectory(TOPOLOGY_ANALYSIS_RULES.ignoredDirectories);
+        if (picked) await addRepositoryFiles(picked.rootName, picked.files);
+      } finally {
+        setIsPickingFolder(false);
+      }
+      return;
+    }
+    folderInputRef.current?.click();
+  };
+
+  const isBusy = isScanning || isPickingFolder;
 
   const handleFolderSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
@@ -75,13 +94,13 @@ export const MultiRepoDropzone: React.FC = () => {
           />
 
           <button
-            disabled={isScanning}
-            onClick={() => folderInputRef.current?.click()}
+            disabled={isBusy}
+            onClick={() => void handleAddRepository()}
             className="flex items-center justify-center gap-2 px-4 py-2 rounded-xl text-xs font-bold bg-emerald-500 hover:bg-emerald-400 text-gray-950 shadow-lg shadow-emerald-500/20 transition-all disabled:opacity-50"
           >
-            {isScanning ? (
+            {isBusy ? (
               <>
-                <Loader2 className="w-4 h-4 animate-spin" /> Escaneando Contratos...
+                <Loader2 className="w-4 h-4 animate-spin" /> {isPickingFolder && !isScanning ? 'Leyendo carpeta...' : 'Escaneando Contratos...'}
               </>
             ) : (
               <>

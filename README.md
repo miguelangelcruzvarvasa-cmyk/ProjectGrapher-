@@ -196,8 +196,7 @@ Si necesitas otro puerto, puedes definir `PORT` para el backend y `VITE_API_URL`
 
 ## Notas Operativas
 
-- El backend principal activo es `main.py` con FastAPI.
-- `server/index.js` queda como proxy legacy y puede levantarse con `npm run server:legacy` si necesitas compararlo o mantener compatibilidad temporal.
+- El backend es `main.py` con FastAPI; es el único backend del proyecto (el proxy legacy en Node fue retirado).
 - Desde Configuración puedes activar o desactivar el `análisis profundo`. Si lo apagas, la app se queda solo con el análisis rápido del navegador y evita depender del backend para refinar el grafo.
 
 ## Proveedores de IA
