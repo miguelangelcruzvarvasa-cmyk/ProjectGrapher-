@@ -17,7 +17,8 @@ export interface SubProjectGroup {
 }
 
 export const groupFilesBySubProjects = (rootName: string, files: File[]): SubProjectGroup[] => {
-  const signatureMap = new Map<string, string>();
+  const subFolderMap = new Map<string, File[]>();
+  const rootFiles: File[] = [];
 
   files.forEach((file) => {
     const rawPath = (file as any).webkitRelativePath || file.name;
@@ -25,62 +26,48 @@ export const groupFilesBySubProjects = (rootName: string, files: File[]): SubPro
     if (IGNORED_PATH_REGEX.test(normalizedPath)) return;
 
     const parts = normalizedPath.split('/').filter(Boolean);
-    const fileName = (parts[parts.length - 1] || '').toLowerCase();
-
-    if (PROJECT_SIGNATURE_FILES.has(fileName)) {
-      const subPathParts = parts.slice(1, -1);
-      // Only consider direct 1st-level subdirectories as subproject roots (depth === 1)
-      if (subPathParts.length === 1) {
-        const subPath = subPathParts[0];
-        if (subPath && !signatureMap.has(subPath)) {
-          signatureMap.set(subPath, fileName);
-        }
+    if (parts.length > 2) {
+      // 1st-level subdirectory (e.g. Refresquera_Delison/src/... or Refresquera_Delison/Security/...)
+      const subFolder = parts[1];
+      if (subFolder) {
+        const current = subFolderMap.get(subFolder) || [];
+        current.push(file);
+        subFolderMap.set(subFolder, current);
+        return;
       }
     }
+    rootFiles.push(file);
   });
 
-  const subPaths = Array.from(signatureMap.keys());
-  const distinctSubPaths: string[] = subPaths;
+  // If there are 2 or more distinct 1st-level subdirectories (e.g. src + Security + production)
+  if (subFolderMap.size >= 2) {
+    const groups: SubProjectGroup[] = [];
 
-  if (distinctSubPaths.length >= 2) {
-    const groups: SubProjectGroup[] = distinctSubPaths.map((sp) => {
-      const folderName = sp.split('/').pop() || sp;
-      return {
-        repoName: folderName,
-        subPath: sp,
-        files: []
-      };
-    });
-
-    const rootFiles: File[] = [];
-
-    files.forEach((file) => {
-      const rawPath = (file as any).webkitRelativePath || file.name;
-      const normalizedPath = rawPath.replace(/\\/g, '/');
-      if (IGNORED_PATH_REGEX.test(normalizedPath)) return;
-
-      const parts = normalizedPath.split('/').filter(Boolean);
-      const relativeSubPath = parts.slice(1).join('/');
-
-      const matchedGroup = groups.find((g) => relativeSubPath.startsWith(`${g.subPath}/`));
-      if (matchedGroup) {
-        matchedGroup.files.push(file);
-      } else {
-        rootFiles.push(file);
+    subFolderMap.forEach((subFiles, subPath) => {
+      if (subFiles.length > 0) {
+        groups.push({
+          repoName: subPath,
+          subPath,
+          files: subFiles
+        });
       }
     });
 
     if (rootFiles.length > 0) {
-      groups.push({
-        repoName: rootName || 'Root Project',
-        subPath: '',
-        files: rootFiles
-      });
+      const validRootCode = rootFiles.some(f => shouldProcessTopologyFile((f as any).webkitRelativePath || f.name, f.size));
+      if (validRootCode) {
+        groups.push({
+          repoName: rootName || 'Root Project',
+          subPath: '',
+          files: rootFiles
+        });
+      }
     }
 
-    return groups.filter((g) => g.files.length > 0);
+    return groups;
   }
 
+  // Fallback: single repository
   return [
     {
       repoName: rootName || 'Repository',
