@@ -3,7 +3,6 @@ import { APP_CONFIG } from '../config/appConfig';
 import { CONTEXT_WORKBENCH_DEFAULTS, SNAPSHOT_EXPORT_CONFIG } from '../config/projectContext';
 import { calculateAAMetrics } from '../utils/analysis';
 import { useProjectStore } from '../store/useProjectStore';
-import { emitSaveContextFiles } from '../store/synapseBridgeConnector';
 
 const buildApiUrl = (path: string) => `${APP_CONFIG.apiBaseUrl}${path}`;
 
@@ -149,9 +148,6 @@ export function useAppController() {
     }
 
     try {
-      // Send to SynapseBridge local daemon in VS Code extension over WebSocket (bypasses Render HTTPS mixed content restriction)
-      emitSaveContextFiles(projectName, files);
-
       const response = await fetch(buildApiUrl('/api/context/export'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -221,9 +217,6 @@ export function useAppController() {
   ]);
 
   const handleDownloadFile = useCallback((content: string, filename: string, type: string) => {
-    // Automatically transmit file to local VS Code workspace via SynapseBridge WebSocket
-    emitSaveContextFiles(projectName, [{ filename, content }]);
-
     const fingerprint = buildContentFingerprint(content);
     const previousFingerprint = downloadedArtifactsRef.current.get(filename);
 

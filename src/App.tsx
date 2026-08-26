@@ -19,7 +19,6 @@ import { TreeItem } from './components/TreeItem';
 import { NavItem } from './components/NavItem';
 import { AITabPanel, AppModals, EmptyProjectState, SettingsTabPanel } from './components/AppPanels';
 import { useAppController } from './hooks/useAppController';
-import { emitSaveContextFiles } from './store/synapseBridgeConnector';
 import { buildFileTree } from './utils/analysis';
 import { cn } from './utils/cn';
 import Markdown from 'react-markdown';
@@ -102,9 +101,6 @@ export default function App() {
   }, [projectData]);
 
   const downloadFileBatch = React.useCallback((files: { filename: string; content: string; type: string }[]) => {
-    // Send full batch via WebSocket directly to local VS Code workspace (.context/)
-    emitSaveContextFiles(projectName, files);
-
     files.forEach((file, index) => {
       window.setTimeout(() => {
         handleDownloadFile(file.content, file.filename, file.type);
