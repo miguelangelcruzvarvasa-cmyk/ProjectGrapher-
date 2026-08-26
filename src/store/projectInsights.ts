@@ -157,9 +157,23 @@ const IMPORT_PATTERNS: Record<string, RegExp[]> = {
   'WebSockets': [/from\s+['"]socket\.io-client['"]/i, /from\s+['"]ws['"]/i, /\bnew\s+WebSocket\(/i],
   'Flutter': [/import\s+['"]package:flutter\//i],
   'Dart': [/import\s+['"]package:[a-zA-Z0-9_]+\//i, /import\s+['"]dart:/i],
-  'Laravel': [/use\s+Illuminate\\/i, /namespace\s+App\\/i, /laravel\/framework/i, /\bRoute::/i, /\bEloquent\b/i],
-  'PHP': [/<\?php/i, /namespace\s+[A-Za-z0-9_\\]+/i, /use\s+[A-Za-z0-9_\\]+/i],
 };
+
+// Patrones especificos de PHP/Laravel. A diferencia de IMPORT_PATTERNS de
+// arriba, estos NO se corren contra todos los archivos: solo tienen sentido
+// dentro del bloque `ext === '.php'` de detectTechStackSignals. Correrlos
+// contra cualquier extension (como se hacia antes) producia falsos positivos
+// severos: el patron generico de PHP (`use <identificador>`) hace match con
+// prosa tan comun como "use the store" en un comentario de TypeScript, y
+// `\bEloquent\b` se auto-detecta en este mismo archivo porque el propio
+// patron contiene esa palabra.
+const LARAVEL_CONTENT_PATTERNS: RegExp[] = [
+  /use\s+Illuminate\\/i,
+  /namespace\s+App\\/i,
+  /laravel\/framework/i,
+  /\bRoute::/i,
+  /\bEloquent\b/i
+];
 
 export const detectTechStackSignals = (file: ProjectFile) => {
   const ext = file.ext.toLowerCase();
@@ -201,8 +215,7 @@ export const detectTechStackSignals = (file: ProjectFile) => {
   if (ext === '.php' || path.endsWith('composer.json') || path.endsWith('artisan')) {
     stack.add('PHP');
     if (
-      lowerCode.includes('illuminate\\') ||
-      lowerCode.includes('laravel/framework') ||
+      detectByImport(code, LARAVEL_CONTENT_PATTERNS) ||
       path.includes('app/http') ||
       path.includes('app/models') ||
       path.includes('app/services') ||
@@ -236,14 +249,14 @@ export const detectTechStackSignals = (file: ProjectFile) => {
   if (/\bfrom\s+['"]dexie['"]/i.test(code) || /\brequire\(['"]dexie['"]\)/i.test(code) || /\bnew\s+Dexie\b/i.test(code)) databases.add('IndexedDB');
   if (/\bwindow\.indexedDB\b|\bindexedDB\.open\b/i.test(code)) databases.add('IndexedDB');
   if (/\bimport\s+sqlite3\b/i.test(code) || /\bfrom\s+['"]sqlite3['"]/i.test(code) || /\bfrom\s+['"]better-sqlite3['"]/i.test(code)) databases.add('SQLite');
-  if (/\bimport\s+psycopg2\b/i.test(code) || /\bfrom\s+['"]pg['"]/i.test(code) || lowerCode.includes('pgsql')) databases.add('PostgreSQL');
-  if (/\bimport\s+pymysql\b/i.test(code) || /\bfrom\s+['"]mysql2?['"]/i.test(code) || lowerCode.includes('pdo_mysql')) databases.add('MySQL');
+  if (/\bimport\s+psycopg2\b/i.test(code) || /\bfrom\s+['"]pg['"]/i.test(code) || (ext === '.php' && lowerCode.includes('pgsql'))) databases.add('PostgreSQL');
+  if (/\bimport\s+pymysql\b/i.test(code) || /\bfrom\s+['"]mysql2?['"]/i.test(code) || (ext === '.php' && lowerCode.includes('pdo_mysql'))) databases.add('MySQL');
   if (/\bimport\s+pyodbc\b/i.test(code) || /\bfrom\s+['"]mssql['"]/i.test(code)) databases.add('SQL Server');
-  if (lowerCode.includes('illuminate\\database') || lowerCode.includes('eloquent')) databases.add('Eloquent ORM (Laravel)');
+  if (ext === '.php' && (lowerCode.includes('illuminate\\database') || lowerCode.includes('eloquent'))) databases.add('Eloquent ORM (Laravel)');
 
   if (detectByImport(code, IMPORT_PATTERNS['FastAPI']) || detectByImport(code, IMPORT_PATTERNS['Flask']) || detectByImport(code, IMPORT_PATTERNS['Django'])) runtime.add('Backend Python');
   if (detectByImport(code, IMPORT_PATTERNS['Express.js']) || detectByImport(code, IMPORT_PATTERNS['NestJS'])) runtime.add('Backend Node');
-  if (detectByImport(code, IMPORT_PATTERNS['Laravel']) || ext === '.php') runtime.add('Backend PHP / Laravel');
+  if (ext === '.php') runtime.add('Backend PHP / Laravel');
   if (path.includes('worker') || /\bself\.onmessage\b|\bpostMessage\b/.test(code)) runtime.add('Background Worker');
 
   if (['.tsx', '.jsx', '.vue', '.svelte', '.dart'].includes(ext) || detectByImport(code, IMPORT_PATTERNS['Angular']) || stack.has('Flutter')) ui.add('SPA Frontend');
