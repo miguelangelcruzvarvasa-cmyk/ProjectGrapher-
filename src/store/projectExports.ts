@@ -172,8 +172,9 @@ const findProjectFile = (projectData: ProjectData, matcher: (normalizedPath: str
 const getSourceOfTruthCandidates = (projectData: ProjectData, projectName: string) => {
   const files = [...projectData.files].sort((a, b) => (b.importance || 0) - (a.importance || 0));
   const rootPath = (path: string) => withProjectRoot(projectName, path);
+  const idToPath = new Map(projectData.files.map((file) => [file.id, rootPath(file.path)]));
 
-  const candidatesByRole = new Map<string, { label: string; summary: string; files: string[] }>();
+  const candidatesByRole = new Map<string, { label: string; files: string[]; fileIds: string[] }>();
 
   files.forEach((file) => {
     const semantic = summarizeFileSemantics(file);
@@ -182,20 +183,67 @@ const getSourceOfTruthCandidates = (projectData: ProjectData, projectName: strin
     if (!candidatesByRole.has(roleKey)) {
       candidatesByRole.set(roleKey, {
         label: roleKey.charAt(0).toUpperCase() + roleKey.slice(1),
-        summary: `Módulos priorizados clasificados como ${roleKey}.`,
-        files: []
+        files: [],
+        fileIds: []
       });
     }
 
     const current = candidatesByRole.get(roleKey)!;
     if (current.files.length < SNAPSHOT_EXPORT_CONFIG.maxFilesPerSourceGroup) {
       current.files.push(rootPath(file.path));
+      current.fileIds.push(file.id);
     }
   });
 
-  return Array.from(candidatesByRole.values())
+  const groups = Array.from(candidatesByRole.values())
     .filter((group) => group.files.length > 0)
     .slice(0, SNAPSHOT_EXPORT_CONFIG.maxSourceGroups);
+
+  // En vez de repetir el nombre de la categoria como "resumen", se calcula
+  // quien usa realmente estos archivos y de que dependen, tomando las
+  // relaciones del grafo. Asi el resumen responde la pregunta util: "si
+  // toco esto, a quien afecto y que necesito revisar antes".
+  return groups.map((group) => {
+    const groupIds = new Set(group.fileIds);
+    const usedBySet = new Set<string>();
+    const dependsOnSet = new Set<string>();
+
+    projectData.links.forEach((link) => {
+      const sourceId = typeof link.source === 'object' ? (link.source as any).id : link.source;
+      const targetId = typeof link.target === 'object' ? (link.target as any).id : link.target;
+
+      if (groupIds.has(targetId) && !groupIds.has(sourceId)) {
+        const path = idToPath.get(sourceId);
+        if (path) usedBySet.add(path);
+      }
+      if (groupIds.has(sourceId) && !groupIds.has(targetId)) {
+        const path = idToPath.get(targetId);
+        if (path) dependsOnSet.add(path);
+      }
+    });
+
+    const usedBy = Array.from(usedBySet);
+    const dependsOn = Array.from(dependsOnSet);
+
+    let summary: string;
+    if (!usedBy.length && !dependsOn.length) {
+      summary = 'Ningún otro módulo detectado los usa ni depende de ellos directamente según el grafo actual.';
+    } else {
+      const usedByText = usedBy.length
+        ? `lo usan directamente ${usedBy.length} módulo(s) (${getTopItems(usedBy, 4)})`
+        : 'ningún otro módulo los usa directamente';
+      const dependsOnText = dependsOn.length
+        ? `dependen de ${dependsOn.length} módulo(s) (${getTopItems(dependsOn, 4)})`
+        : 'no dependen de otros módulos del proyecto';
+      summary = `Si modificas alguno de estos archivos: ${usedByText}, y ${dependsOnText}.`;
+    }
+
+    return {
+      label: group.label,
+      summary,
+      files: group.files
+    };
+  });
 };
 
 const buildSourcesOfTruthBlock = (projectData: ProjectData, projectName: string) => {

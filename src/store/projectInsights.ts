@@ -694,9 +694,17 @@ export const buildHotspotReport = (insights: ProjectInsights, aiReview?: string 
 
 export const buildTaskPackData = (projectData: ProjectData, insights: ProjectInsights, task: string): AgentTaskPackData => {
   const rootPath = (path: string) => withProjectRoot(insights.projectName, path);
-  const normalizedTask = task.trim() || 'Analiza la tarea solicitada y ubica los archivos relevantes.';
-  const baseTerms = tokenizeTask(normalizedTask);
-  const expandedTerms = expandTaskTerms(baseTerms);
+  const hasRealTask = task.trim().length > 0;
+  // Sin tarea real no hay que inventar una: tokenizar una frase placeholder
+  // ("ubica los archivos relevantes") hacia match contra el contenido real
+  // de los archivos (ej. "menciona 'archivo'"), lo cual es ruido, no
+  // informacion util. Sin terminos, el ranking cae solo en hotspots/entry
+  // points reales, que es lo unico que se puede afirmar sin una tarea.
+  const normalizedTask = hasRealTask
+    ? task.trim()
+    : 'No se especificó una tarea concreta: se muestran los archivos más relevantes según hotspots y entry points del proyecto.';
+  const baseTerms = hasRealTask ? tokenizeTask(normalizedTask) : [];
+  const expandedTerms = hasRealTask ? expandTaskTerms(baseTerms) : [];
   const intents = detectTaskIntents(expandedTerms);
 
   const scoredFiles = projectData.files.map((file) => {
@@ -903,7 +911,7 @@ export const buildTaskPackData = (projectData: ProjectData, insights: ProjectIns
 export const buildTaskPack = (projectData: ProjectData, insights: ProjectInsights, task: string, aiReview?: string | null) => {
   const data = buildTaskPackData(projectData, insights, task);
   const highlights = extractAIHighlightsForIntent(aiReview || null, 'handoff', 4);
-  const baseTerms = tokenizeTask(task.trim() || 'Analiza la tarea solicitada y ubica los archivos relevantes.');
+  const baseTerms = task.trim().length > 0 ? tokenizeTask(task.trim()) : [];
 
   const primaryPaths = new Set(data.primaryFiles.map(f => f.path));
   const relatedPaths = new Set(data.relatedFiles.map(f => f.path));
