@@ -9,6 +9,8 @@ from typing import Optional, Dict, Any, List
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 from dotenv import load_dotenv
 
@@ -440,6 +442,27 @@ async def export_context_files(request: ContextExportRequest):
 @app.get("/health")
 async def health():
     return {"status": APP_SETTINGS["backend_status"], "backend": APP_SETTINGS["backend_label"]}
+
+# --- FRONTEND ESTATICO (build de Vite) ---
+# Se registra al final para no chocar con las rutas /api/* y /health de arriba:
+# FastAPI resuelve rutas en orden de declaracion, y esta usa un comodin que
+# atraparia cualquier request si se declarara antes.
+DIST_DIR = Path(__file__).resolve().parent / "dist"
+if DIST_DIR.exists():
+    assets_dir = DIST_DIR / "assets"
+    if assets_dir.exists():
+        app.mount("/assets", StaticFiles(directory=assets_dir), name="assets")
+
+    @app.get("/{full_path:path}")
+    async def serve_frontend(full_path: str):
+        candidate = DIST_DIR / full_path
+        if full_path and candidate.is_file():
+            return FileResponse(candidate)
+        # Fallback SPA: cualquier ruta de cliente (React Router, refresh, etc.)
+        # sirve index.html y deja que el frontend resuelva la navegacion.
+        return FileResponse(DIST_DIR / "index.html")
+else:
+    logger.warning(f"No se encontro carpeta dist/ en {DIST_DIR}; el frontend no se servira desde este proceso.")
 
 if __name__ == "__main__":
     import uvicorn
