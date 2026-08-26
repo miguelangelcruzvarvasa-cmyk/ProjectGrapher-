@@ -1,7 +1,7 @@
 import { TOPOLOGY_ANALYSIS_RULES } from '../config/rules';
 import type { ProjectFile, Repository, ApiEndpoint, FrontendApiCall } from '../types/topology';
 
-const IGNORED_PATH_REGEX = /(?:^|\/)(?:\.claude|\.angular|\.git|\.vscode|\.idea|\.cache|\.vite|\.next|\.nuxt|\.svelte-kit|\.turbo|\.output|node_modules|vendor|dist|build|worktrees|\.worktrees)(?:\/|$)/i;
+const IGNORED_PATH_REGEX = /(?:^|\/)(?:\.claude|\.angular|\.git|\.vscode|\.idea|\.cache|\.vite|\.next|\.nuxt|\.svelte-kit|\.turbo|\.output|node_modules|vendor|dist|build|worktrees|\.worktrees|contexto)(?:\/|$)/i;
 
 export const PROJECT_SIGNATURE_FILES = new Set([
   'package.json', 'composer.json', 'requirements.txt', 'pyproject.toml',

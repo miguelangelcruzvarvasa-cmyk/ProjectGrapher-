@@ -22,7 +22,12 @@ export const PROJECT_ANALYSIS_RULES = {
     // Carpetas de config de asistentes/agentes de IA y editores (no son código del proyecto)
     '.claude', '.cursor', '.windsurf', '.continue', '.aider', '.aider.tags.cache.v3',
     '.copilot', '.github-copilot', '.zed', '.trae', '.codeium', '.amazonq', '.qodo',
-    '.mimocode', '.vs', '.history'
+    '.mimocode', '.vs', '.history',
+    // Exportes propios de ProjectGrapher (snapshots, briefs, etc.). Si no se
+    // ignoran, un análisis posterior del mismo proyecto los vuelve a leer como
+    // "código fuente" y contamina la detección de stack con menciones de texto
+    // de proyectos ya analizados anteriormente.
+    'contexto'
   ],
   ignoredFiles: [
     'package-lock.json', 'yarn.lock', 'pnpm-lock.yaml',

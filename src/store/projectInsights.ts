@@ -162,10 +162,19 @@ const IMPORT_PATTERNS: Record<string, RegExp[]> = {
 };
 
 export const detectTechStackSignals = (file: ProjectFile) => {
+  const ext = file.ext.toLowerCase();
+
+  // Los archivos de prosa (.md, .txt) pueden mencionar tecnologías en texto
+  // descriptivo (ej. un reporte previo de ProjectGrapher que describe un
+  // proyecto Laravel) sin que el proyecto actual las use de verdad. Tratar
+  // ese texto como código real produce falsos positivos de stack.
+  if (ext === '.md' || ext === '.mdx' || ext === '.txt') {
+    return { stack: [], databases: [], runtime: [], ui: [] };
+  }
+
   const code = file.content;
   const lowerCode = file.content.toLowerCase();
   const path = file.path.toLowerCase();
-  const ext = file.ext.toLowerCase();
 
   const stack = new Set<string>();
   const databases = new Set<string>();
