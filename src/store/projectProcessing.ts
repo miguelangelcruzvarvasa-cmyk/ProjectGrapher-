@@ -1,4 +1,4 @@
-import { GraphLink, GraphNode, ProjectData } from '../types';
+import { GraphLink, GraphNode, ProjectData, ProjectFile } from '../types';
 import { createProjectFileResolver, normalizeProjectPath, shouldProcessFile } from '../utils/analysis';
 
 const MAX_GRAPH_FILES = 1500;
@@ -99,7 +99,9 @@ type WorkerInputFile = {
   path: string;
   name: string;
   size: number;
-  file: File;
+  lastModified?: number;
+  file?: File;
+  content?: string;
 };
 
 type ProgressPayload = {
@@ -181,6 +183,7 @@ export const prepareProjectFilesForWorker = async (
     path,
     name,
     size,
+    lastModified: file.lastModified,
     file
   }));
 
@@ -197,6 +200,66 @@ export const prepareProjectFilesForWorker = async (
     skippedCount,
     workerInput
   };
+};
+
+export type SyncInputResult = {
+  workerInput: WorkerInputFile[];
+  skippedCount: number;
+  reusedCount: number;
+  rereadCount: number;
+  removedPaths: string[];
+};
+
+/**
+ * Prepara el input del worker para una sincronización incremental: compara
+ * los archivos frescos de un re-escaneo contra los ya conocidos y solo marca
+ * para releer (I/O real) los que son nuevos o cambiaron de tamaño/fecha de
+ * modificación. Los que no cambiaron viajan con su `content` ya en caché, así
+ * el worker no vuelve a tocar el disco por ellos — solo recalcula el grafo
+ * completo (rápido, es regex en memoria) sobre el conjunto combinado.
+ */
+export const prepareSyncInput = (
+  freshFiles: File[],
+  previousFiles: ProjectFile[]
+): SyncInputResult => {
+  const previousByPath = new Map(previousFiles.map((f) => [f.path, f]));
+  const seenPaths = new Set<string>();
+
+  const candidates: { file: File; path: string; name: string; size: number }[] = [];
+  for (const file of freshFiles) {
+    const rawPath = (file as any).webkitRelativePath || file.name;
+    if (!shouldProcessFile(rawPath, file.size)) continue;
+    candidates.push({ file, path: getProjectRelativePath(rawPath), name: file.name, size: file.size });
+  }
+
+  candidates.sort((a, b) => {
+    const priorityDiff = prioritizeFile(a.path, a.name) - prioritizeFile(b.path, b.name);
+    if (priorityDiff !== 0) return priorityDiff;
+    return a.path < b.path ? -1 : (a.path > b.path ? 1 : 0);
+  });
+
+  const selected = candidates.slice(0, MAX_GRAPH_FILES);
+  const skippedCount = candidates.length - selected.length;
+
+  let reusedCount = 0;
+  let rereadCount = 0;
+  const workerInput: WorkerInputFile[] = selected.map(({ file, path, name, size }) => {
+    seenPaths.add(path);
+    const previous = previousByPath.get(path);
+    const unchanged = !!previous && previous.size === size && previous.lastModified === file.lastModified;
+
+    if (unchanged) {
+      reusedCount += 1;
+      return { path, name, size, lastModified: file.lastModified, content: previous!.content };
+    }
+
+    rereadCount += 1;
+    return { path, name, size, lastModified: file.lastModified, file };
+  });
+
+  const removedPaths = previousFiles.map((f) => f.path).filter((path) => !seenPaths.has(path));
+
+  return { workerInput, skippedCount, reusedCount, rereadCount, removedPaths };
 };
 
 export const buildDeepAnalysisGraph = (projectData: ProjectData, analysisResults: DeepAnalysisResult[]) => {

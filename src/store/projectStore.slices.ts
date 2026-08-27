@@ -1,12 +1,13 @@
 import type { StoreApi } from 'zustand';
 import { db } from '../db/projectDB';
-import { buildDeepAnalysisGraph, prepareProjectFilesForWorker } from './projectProcessing';
+import { buildDeepAnalysisGraph, prepareProjectFilesForWorker, prepareSyncInput } from './projectProcessing';
 import type { ProjectState } from './projectStore.types';
 import { generateAIContextExport, generateCriticalFlowsExport, generateGraphGuideExport, generateProjectBriefExport, generateProjectMetadataExport, generateTreeOnlyExport, hashContext } from './projectExports';
 import { buildAIArchitectureNarrative, buildAIAgentHandoff, buildAIRefactorPriorities, buildAIVisionDocument, buildErrorContextPack, buildErrorContextPackData, buildExecutiveContext, buildHotspotReport, buildImpactAnalysisData, buildSemanticSearchResults, buildSmartDiffData, buildSystemView, buildTaskPack, buildTaskPackData, extractProjectInsights, formatProjectPaths } from './projectInsights';
 import { DEFAULT_AI_PROVIDER, getDefaultAiModel } from '../config/aiDefaults';
 import { APP_CONFIG } from '../config/appConfig';
-import { useTopologyStore } from './useTopologyStore';
+import { PROJECT_ANALYSIS_RULES } from '../config/projectContext';
+import { hasActiveDirectoryHandle, rescanActiveDirectory, clearActiveDirectoryHandle } from '../utils/directoryScan';
 
 type SetState = StoreApi<ProjectState>['setState'];
 type GetState = StoreApi<ProjectState>['getState'];
@@ -201,6 +202,8 @@ export const createProjectSlice = (set: SetState, get: GetState) => ({
   useDeepAnalysis: true,
   lastContextHash: null,
   contextHistory: [],
+  isSyncingDirectory: false,
+  syncStatus: null,
   setProjectData: (data: ProjectState['projectData']) => set({ projectData: data }),
   setSkippedCount: (count: number) => set({ skippedCount: count }),
   setSelectedNode: (node: ProjectState['selectedNode']) => {
@@ -245,6 +248,7 @@ export const createProjectSlice = (set: SetState, get: GetState) => ({
     activeAnalysisWorker = null;
     activeDeepAnalysisController?.abort();
     activeDeepAnalysisController = null;
+    clearActiveDirectoryHandle();
 
     set({
       projectData: null,
@@ -261,9 +265,81 @@ export const createProjectSlice = (set: SetState, get: GetState) => ({
         total: 0,
         ratio: 0
       },
-      activeTab: 'details'
+      activeTab: 'details',
+      syncStatus: null
     });
     await db.projects.clear();
+  },
+  canSyncDirectory: () => hasActiveDirectoryHandle(),
+  syncProjectDirectory: async () => {
+    const { projectData, projectName, isProcessing, isSyncingDirectory } = get();
+    if (!projectData || !projectName || isProcessing || isSyncingDirectory) return;
+
+    if (!hasActiveDirectoryHandle()) {
+      set({ syncStatus: 'Esta sesión no retiene el permiso de la carpeta; usa "Seleccionar Carpeta" de nuevo para poder sincronizar.' });
+      return;
+    }
+
+    const runId = ++activeAnalysisRunId;
+    set({ isSyncingDirectory: true, syncStatus: 'Revisando cambios en la carpeta...' });
+
+    const fresh = await rescanActiveDirectory(PROJECT_ANALYSIS_RULES.ignoredDirectories);
+    if (runId !== activeAnalysisRunId) return;
+
+    if (!fresh) {
+      set({
+        isSyncingDirectory: false,
+        syncStatus: 'No se pudo re-leer la carpeta (¿se revocó el permiso o se movió/borró?). Vuelve a seleccionarla si sigue existiendo.'
+      });
+      return;
+    }
+
+    const { workerInput, reusedCount, rereadCount, removedPaths } = prepareSyncInput(fresh.files, projectData.files);
+
+    if (rereadCount === 0 && removedPaths.length === 0) {
+      set({ isSyncingDirectory: false, syncStatus: `Sin cambios: ${reusedCount} archivos siguen igual.` });
+      return;
+    }
+
+    activeAnalysisWorker?.terminate();
+    const worker = new Worker(new URL('../workers/analysis.worker.ts', import.meta.url), { type: 'module' });
+    activeAnalysisWorker = worker;
+    worker.postMessage({ files: workerInput });
+
+    worker.onmessage = async (e) => {
+      if (runId !== activeAnalysisRunId) {
+        worker.terminate();
+        if (activeAnalysisWorker === worker) activeAnalysisWorker = null;
+        return;
+      }
+      if (e.data?.progress) return;
+
+      const { projectData: syncedData } = e.data;
+      set({ projectData: syncedData });
+      await db.projects.add({ name: projectName, data: syncedData, timestamp: Date.now() });
+
+      worker.terminate();
+      if (activeAnalysisWorker === worker) activeAnalysisWorker = null;
+      if (runId !== activeAnalysisRunId) return;
+
+      await get().refreshSmartDiff();
+
+      const parts = [];
+      if (rereadCount) parts.push(`${rereadCount} nuevo(s)/modificado(s)`);
+      if (removedPaths.length) parts.push(`${removedPaths.length} eliminado(s)`);
+      parts.push(`${reusedCount} sin cambios`);
+
+      set({ isSyncingDirectory: false, syncStatus: `Sincronizado: ${parts.join(', ')}.` });
+    };
+
+    worker.onerror = (err) => {
+      console.error('Sync worker error:', err);
+      worker.terminate();
+      if (activeAnalysisWorker === worker) activeAnalysisWorker = null;
+      if (runId === activeAnalysisRunId) {
+        set({ isSyncingDirectory: false, syncStatus: 'Error al sincronizar; revisa la consola.' });
+      }
+    };
   },
   checkContextDuplicate: (content: string) => {
     const { lastContextHash } = get();

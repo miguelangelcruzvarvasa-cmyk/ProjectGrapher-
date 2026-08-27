@@ -7,6 +7,7 @@ export interface ProjectFile {
   ext: string;
   size: number;
   importance: number; // Degree centrality or similar
+  lastModified?: number; // File.lastModified, usado para detectar cambios al sincronizar
 }
 
 export interface GraphNode extends d3.SimulationNodeDatum {

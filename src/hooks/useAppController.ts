@@ -26,7 +26,8 @@ export function useAppController() {
     generateAIVisionDocument, generateAIArchitectureNarrative, generateAIRefactorPriorities, generateAIAgentHandoff,
     aiProvider, aiModel, customUrl, customKey, envKeys, checkEnvKeys,
     setAiProvider, setAiModel, setCustomUrl, setCustomKey, setProjectGlobalMemory, setProjectFileMemory, projectName,
-    closeProject
+    closeProject,
+    syncProjectDirectory, canSyncDirectory, isSyncingDirectory, syncStatus
   } = useProjectStore();
 
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
@@ -368,6 +369,10 @@ export function useAppController() {
     setProjectFileMemory,
     projectName,
     closeProject,
+    syncProjectDirectory,
+    canSyncDirectory,
+    isSyncingDirectory,
+    syncStatus,
     isMobileMenuOpen,
     setIsMobileMenuOpen,
     copied,

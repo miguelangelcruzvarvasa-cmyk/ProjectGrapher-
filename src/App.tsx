@@ -8,7 +8,7 @@ import {
   Network, FileText, ChevronRight, X, Play,
   Search, Info, Database, Download,
   LayoutDashboard, Share2, Folder,
-  Sparkles, Loader2, BarChart3, Activity, Settings, LogOut
+  Sparkles, Loader2, BarChart3, Activity, Settings, LogOut, RefreshCw
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 
@@ -22,15 +22,6 @@ import { useAppController } from './hooks/useAppController';
 import { buildFileTree } from './utils/analysis';
 import { cn } from './utils/cn';
 import Markdown from 'react-markdown';
-
-// Agent Topology Shield Imports
-import { Header as TopologyHeader } from './components/Header';
-import { MultiRepoDropzone } from './components/MultiRepoDropzone';
-import { TopologyCanvas } from './components/TopologyCanvas';
-import { ContractPanel } from './components/ContractPanel';
-import { RiskMatrixPanel } from './components/RiskMatrixPanel';
-import { ShieldWorkbench } from './components/ShieldWorkbench';
-import { useTopologyStore } from './store/useTopologyStore';
 
 export default function App() {
   const {
@@ -86,14 +77,12 @@ export default function App() {
     architectureSnapshotTokenEstimate,
     activeProjectMemory,
     selectedNodeMemory,
-    focusNodeByProjectPath
+    focusNodeByProjectPath,
+    syncProjectDirectory,
+    canSyncDirectory,
+    isSyncingDirectory,
+    syncStatus
   } = useAppController();
-  const [appMode, setAppMode] = React.useState<'multi_repo_shield' | 'single_repo'>('single_repo');
-  const { repositories: topologyRepos, activeTab: topologyTab, loadLastTopology } = useTopologyStore();
-
-  React.useEffect(() => {
-    loadLastTopology();
-  }, [loadLastTopology]);
   const [exportAssetTab, setExportAssetTab] = React.useState<'snapshot' | 'brief' | 'technical' | 'guide' | 'raw'>('snapshot');
   const mostCriticalFile = React.useMemo(() => {
     if (!projectData?.files || projectData.files.length === 0) return null;
@@ -145,23 +134,6 @@ export default function App() {
     }
   ];
 
-  if (appMode === 'multi_repo_shield') {
-    return (
-      <div className="min-h-screen w-full bg-gray-950 text-gray-100 flex flex-col font-sans selection:bg-emerald-500 selection:text-black">
-        <TopologyHeader appMode={appMode} setAppMode={setAppMode} />
-
-        <main className="flex-1 w-full max-w-7xl mx-auto p-4 sm:p-6 space-y-6 overflow-y-auto">
-          <MultiRepoDropzone />
-
-          {topologyTab === 'topology' && <TopologyCanvas />}
-          {topologyTab === 'contracts' && <ContractPanel />}
-          {topologyTab === 'risk' && <RiskMatrixPanel />}
-          {topologyTab === 'shield' && <ShieldWorkbench />}
-        </main>
-      </div>
-    );
-  }
-
   if (!projectData) {
     return (
       <EmptyProjectState
@@ -169,8 +141,6 @@ export default function App() {
         isProcessing={isProcessing}
         processingProgress={processingProgress}
         onProcessFiles={processFiles}
-        appMode={appMode}
-        setAppMode={setAppMode}
       />
     );
   }
@@ -283,6 +253,20 @@ export default function App() {
             {isReviewing ? <Loader2 className="w-6 h-6 animate-spin" /> : <BarChart3 className="w-6 h-6" />}
             <span className="md:hidden font-bold">Generar Reporte AI</span>
           </button>
+          {canSyncDirectory() && (
+            <button
+              onClick={() => void syncProjectDirectory()}
+              disabled={isSyncingDirectory}
+              className={cn(
+                "p-3 rounded-xl transition-all border border-gray-800 flex items-center justify-center gap-3 w-full md:w-auto",
+                isSyncingDirectory ? "bg-gray-800 text-gray-400" : "text-gray-400 hover:text-brand-primary hover:bg-brand-primary/10"
+              )}
+              title={syncStatus || 'Releer la carpeta y traer solo lo que cambió'}
+            >
+              <RefreshCw className={cn("w-6 h-6", isSyncingDirectory && "animate-spin")} />
+              <span className="md:hidden font-bold">{isSyncingDirectory ? 'Sincronizando...' : 'Sincronizar Cambios'}</span>
+            </button>
+          )}
           <button
             onClick={async () => await closeProject()}
             className="p-3 text-gray-500 hover:text-red-400 hover:bg-red-400/10 rounded-xl transition-all flex items-center justify-center gap-3 w-full md:w-auto"
@@ -313,20 +297,16 @@ export default function App() {
                     {skippedCount.toLocaleString()} Ignored
                   </span>
                 )}
+                {syncStatus && (
+                  <span className="text-[10px] font-mono text-brand-primary bg-brand-primary/10 px-2 py-0.5 rounded border border-brand-primary/20">
+                    {syncStatus}
+                  </span>
+                )}
               </div>
             </div>
           </div>
 
           <div className="flex items-center gap-4">
-            <button
-              onClick={() => setAppMode('multi_repo_shield')}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-emerald-500/30 bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-300 text-xs font-bold transition-all shadow-sm"
-              title="Cambiar a Auditoría de Topología Multi-Repositorio"
-            >
-              <Network className="w-3.5 h-3.5 text-emerald-400" />
-              Multi-Repo Topology
-            </button>
-
             <div className="flex items-center gap-2 rounded-full border border-gray-800 bg-brand-surface/60 p-1">
               {(['auto', 'focused', 'expanded'] as const).map((mode) => (
                 <button
@@ -1214,7 +1194,6 @@ export default function App() {
                       { filename: `${projectName}_brief.md`, content: generateProjectBrief(), type: 'text/markdown' },
                       { filename: `${projectName}_project_summary.json`, content: generateProjectMetadata(), type: 'application/json' },
                       { filename: `${projectName}_graph_guide.md`, content: generateGraphGuide(), type: 'text/markdown' },
-                      { filename: `${projectName}_critical_flows.md`, content: generateCriticalFlows(), type: 'text/markdown' },
                       { filename: `${projectName}_architecture_map.json`, content: JSON.stringify(projectData, null, 2), type: 'application/json' }
                     ])}
                     className="inline-flex w-full items-center justify-center gap-2 rounded-2xl bg-sky-500 px-4 py-3 text-sm font-black text-black transition-all hover:brightness-110"

@@ -21,6 +21,23 @@ export const getExtension = (filename: string) => {
   return parts.length > 1 ? `.${parts.pop()?.toLowerCase()}` : '';
 };
 
+/**
+ * File.text()/FileReader.readAsText() siempre decodifican como UTF-8 y
+ * reemplazan cualquier byte inválido por "�" (U+FFFD) de forma silenciosa e
+ * irreversible. Eso corrompe cualquier archivo guardado en Windows-1252/
+ * Latin-1 (tildes, eñes, etc. en código o comentarios viejos de Windows).
+ * Aquí se intenta UTF-8 en modo estricto primero; si falla, se cae a
+ * windows-1252, que decodifica ese mismo texto sin pérdida.
+ */
+export const readFileTextWithEncodingFallback = async (file: File): Promise<string> => {
+  const buffer = await file.arrayBuffer();
+  try {
+    return new TextDecoder('utf-8', { fatal: true }).decode(buffer);
+  } catch {
+    return new TextDecoder('windows-1252').decode(buffer);
+  }
+};
+
 export const normalizeProjectPath = (value: string) =>
   value
     .replace(/\\/g, '/')

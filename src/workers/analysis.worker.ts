@@ -1,5 +1,5 @@
 import { ProjectFile, GraphNode, GraphLink } from '../types';
-import { getExtension, findDependencies, shouldProcessFile, createProjectFileResolver, normalizeProjectPath } from '../utils/analysis';
+import { getExtension, findDependencies, shouldProcessFile, createProjectFileResolver, normalizeProjectPath, readFileTextWithEncodingFallback } from '../utils/analysis';
 
 // Note: In a real Vite setup, you might need to import these differently if they are not worker-compatible.
 // But since they are pure logic functions, they should be fine.
@@ -16,7 +16,18 @@ const getClusterName = (path: string) => {
   return primary;
 };
 
-self.onmessage = async (e: MessageEvent<{ files: { path: string, file: File, size: number, name: string }[] }>) => {
+type IncomingFile = {
+  path: string;
+  size: number;
+  name: string;
+  lastModified?: number;
+  // Sync incremental: si ya viene `content`, el archivo no cambió desde el
+  // último escaneo y no hace falta releerlo del disco.
+  file?: File;
+  content?: string;
+};
+
+self.onmessage = async (e: MessageEvent<{ files: IncomingFile[] }>) => {
   const { files: rawFiles } = e.data;
   const validFiles: ProjectFile[] = [];
   let skippedCount = 0;
@@ -40,8 +51,12 @@ self.onmessage = async (e: MessageEvent<{ files: { path: string, file: File, siz
     // Read batch in parallel
     const readResults = await Promise.all(
       validBatch.map(async (item) => {
+        if (item.content !== undefined) {
+          // Ya lo leímos en un escaneo anterior y no cambió: nos ahorramos el I/O.
+          return { ...item, content: item.content };
+        }
         try {
-          const content = await item.file.text();
+          const content = await readFileTextWithEncodingFallback(item.file!);
           return { ...item, content };
         } catch (err) {
           console.error(`Error reading ${item.path}:`, err);
@@ -62,7 +77,8 @@ self.onmessage = async (e: MessageEvent<{ files: { path: string, file: File, siz
         content: item.content,
         ext: getExtension(item.name),
         size: item.size,
-        importance: 0
+        importance: 0,
+        lastModified: item.lastModified
       });
     }
 

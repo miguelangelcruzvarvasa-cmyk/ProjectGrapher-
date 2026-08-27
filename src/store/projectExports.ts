@@ -602,8 +602,9 @@ export const generateProjectBriefExport = (projectData: ProjectData, projectName
   brief += `- Relaciones detectadas: ${projectData.links.length}\n`;
   brief += `- Entry points probables: ${formatProjectPaths(projectName, entryPoints).join(', ') || 'No detectados'}\n`;
   brief += `- Hotspots principales: ${hotspotFiles.map((file) => `${file.name} [${file.importance || 0}]`).join(', ') || 'No detectados'}\n\n`;
-  brief += buildSourcesOfTruthBlock(projectData, projectName);
-  brief += buildCriticalFlowsBlock(projectData, projectName);
+  brief += '## Más Detalle\n';
+  brief += `- Fuentes de verdad y flujos críticos completos: ver \`${projectName}_critical_flows.md\`.\n`;
+  brief += `- Grafo de dependencias completo: ver \`${projectName}_graph_guide.md\`.\n\n`;
   brief += '## Qué Pasarle A Otro Agente\n';
   brief += `- Este proyecto usa: ${topLanguages.slice(0, 4).join(', ') || 'lenguajes no detectados con claridad'}.\n`;
   brief += `- Componentes críticos: ${hotspotFiles.slice(0, 5).map((file) => withProjectRoot(projectName, file.path)).join(', ') || 'No detectados'}.\n`;
@@ -732,7 +733,6 @@ export const generateGraphGuideExport = (projectData: ProjectData, projectName: 
   guide += `- Nodos: ${projectData.nodes.length}\n`;
   guide += `- Relaciones: ${projectData.links.length}\n`;
   guide += `- Módulos más conectados: ${ranking.slice(0, 8).map((node) => `${node.label} (${node.total})`).join(', ') || 'N/A'}\n\n`;
-  guide += buildSourcesOfTruthBlock(projectData, projectName);
   guide += '## Archivos Orquestadores\n';
   orchestrators.forEach((node) => {
     guide += `- ${node.label}\n`;

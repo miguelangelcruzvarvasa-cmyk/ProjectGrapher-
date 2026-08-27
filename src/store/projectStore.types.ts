@@ -156,6 +156,8 @@ export interface ProjectState {
   envKeyDetails: Record<string, { configured: boolean; envVar: string; source: 'env' | 'none' }>;
   lastContextHash: string | null;
   contextHistory: { hash: string; timestamp: number; task: string }[];
+  isSyncingDirectory: boolean;
+  syncStatus: string | null;
   setProjectData: (data: ProjectData | null) => void;
   setSkippedCount: (count: number) => void;
   setSelectedNode: (node: GraphNode | null) => void;
@@ -175,6 +177,8 @@ export interface ProjectState {
   setShowIAModal: (show: boolean) => void;
   checkEnvKeys: () => Promise<void>;
   processFiles: (files: FileList | File[]) => Promise<void>;
+  syncProjectDirectory: () => Promise<void>;
+  canSyncDirectory: () => boolean;
   performDeepAnalysis: () => Promise<void>;
   loadLastProject: () => Promise<void>;
   generateAIReview: () => Promise<void>;
