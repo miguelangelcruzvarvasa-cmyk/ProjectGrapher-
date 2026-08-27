@@ -597,10 +597,19 @@ export const summarizeFileSemantics = (file: ProjectFile): FileSemanticSummary =
     role = 'worker o procesamiento en segundo plano';
     confidence = 'high';
     evidence = 'path+code';
-  } else if (/\/components\/|\/pages\/|\/views\/|\/screens\//.test(normalizedPath) || /return\s*\(|jsx|tsx|react/i.test(content)) {
+  } else if (
+    /\/components\/|\/pages\/|\/views\/|\/screens\//.test(normalizedPath) ||
+    ext === '.jsx' || ext === '.tsx' ||
+    // Señales de código real de React/JSX, no solo la palabra suelta en el
+    // contenido (un archivo de config que liste ".tsx" como extensión
+    // permitida, por ejemplo, no debe contar como componente de interfaz).
+    /\bfrom\s+['"]react(-dom)?['"]|require\(\s*['"]react(-dom)?['"]\s*\)/.test(content) ||
+    /<[A-Z][\w.]*[\s/>]/.test(content)
+  ) {
+    const isComponentPath = /\/components\/|\/pages\/|\/views\/|\/screens\//.test(normalizedPath);
     role = 'componente, pantalla u orquestador de interfaz';
-    confidence = /\/components\/|\/pages\/|\/views\/|\/screens\//.test(normalizedPath) ? 'high' : 'medium';
-    evidence = /\/components\/|\/pages\/|\/views\/|\/screens\//.test(normalizedPath) ? 'path+code' : 'code';
+    confidence = isComponentPath ? 'high' : 'medium';
+    evidence = isComponentPath ? 'path+code' : 'code';
   } else if (/\.(css|scss|sass|less)$/.test(normalizedName)) {
     role = 'estilos o tokens visuales';
     confidence = 'high';

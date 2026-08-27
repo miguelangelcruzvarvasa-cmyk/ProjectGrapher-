@@ -27,7 +27,11 @@ export const PROJECT_ANALYSIS_RULES = {
     // ignoran, un análisis posterior del mismo proyecto los vuelve a leer como
     // "código fuente" y contamina la detección de stack con menciones de texto
     // de proyectos ya analizados anteriormente.
-    'contexto'
+    'contexto',
+    // Servidor MCP auxiliar de ProjectGrapher: es una herramienta de soporte
+    // para agentes, no arquitectura del proyecto en sí. Si no se ignora,
+    // contamina hotspots/entry points/capas con su propio server.py.
+    'mcp_server'
   ],
   ignoredFiles: [
     'package-lock.json', 'yarn.lock', 'pnpm-lock.yaml',
