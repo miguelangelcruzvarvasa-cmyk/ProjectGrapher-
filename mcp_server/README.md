@@ -9,8 +9,13 @@ No re-analiza el código: lee el JSON que ya exportaste desde la app
 
 ## Setup
 
+Este servidor corre en tu máquina (lo lanza Claude Code u otro agente), no en
+el backend de producción — por eso tiene su propio `requirements.txt`,
+separado del de la raíz, para no arrastrar `mcp` (y su dependencia de
+`pydantic>=2.11`) al build de Render.
+
 ```bash
-pip install -r requirements.txt
+pip install -r mcp_server/requirements.txt
 ```
 
 ## Usar con Claude Code
