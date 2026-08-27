@@ -604,7 +604,11 @@ export const summarizeFileSemantics = (file: ProjectFile): FileSemanticSummary =
     // contenido (un archivo de config que liste ".tsx" como extensión
     // permitida, por ejemplo, no debe contar como componente de interfaz).
     /\bfrom\s+['"]react(-dom)?['"]|require\(\s*['"]react(-dom)?['"]\s*\)/.test(content) ||
-    /<[A-Z][\w.]*[\s/>]/.test(content)
+    // Tag de cierre real (</Foo>) o auto-cierre (<Foo />): un genérico de
+    // TypeScript como SimulationLinkDatum<GraphNode> nunca produce ninguno
+    // de los dos, así que no dispara este falso positivo.
+    /<\/[A-Za-z][\w.]*>/.test(content) ||
+    /<[A-Z][\w.]*(\s[^<>]*)?\/>/.test(content)
   ) {
     const isComponentPath = /\/components\/|\/pages\/|\/views\/|\/screens\//.test(normalizedPath);
     role = 'componente, pantalla u orquestador de interfaz';
